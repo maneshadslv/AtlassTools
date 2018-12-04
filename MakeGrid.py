@@ -43,9 +43,9 @@ __keepfiles=None #can be overritten by settings
 @Gooey(program_name="Make Grid", advanced=True, default_size=(1000,800), use_legacy_titles=True, required_cols=1, optional_cols=3)
 def param_parser():
     main_parser=GooeyParser(description="Make Grid")
-    main_parser.add_argument("lasfiles", metavar="LAS files", widget="MultiFileChooser", help="Select input las/laz file", default='D:\\Python\\Gui\\input\\256000_7314000.las;D:\\Python\\Gui\\input\\256000_7316000.las;D:\\Python\\Gui\\input\\258000_7312000.las;D:\\Python\\Gui\\input\\258000_7314000.las;D:\\Python\\Gui\\input\\260000_7312000.las')
+    main_parser.add_argument("lasfiles", metavar="LAS files", widget="MultiFileChooser", help="Select input las/laz file", default=" ")
     #main_parser.add_argument("geojsonfile", metavar="GoeJson file", widget="FileChooser", help="Select geojson file", default='D:\\Python\\Gui\\input\\TileLayout.json')
-    main_parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default="D:\\Python\\Gui\\output")
+    main_parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default=" ")
     product_group = main_parser.add_argument_group("Products", "Select Output Products", gooey_options={'show_border': True,'columns': 5})
     product_group.add_argument("-dtm", "--makeDTM", metavar="DTM", action='store_true', default=True)
     product_group.add_argument("-dem", "--makeDEM", metavar="DEM", action='store_true', default=True)
