@@ -354,7 +354,7 @@ def main(argv):
     #Multithread runner task
     results=AtlassTaskRunner(cores,TASKS,'Making products', al, str(args)).results
     
-    al.DumpLog();
+    al.DumpLog()
         
     return
         
