@@ -38,9 +38,9 @@ from Atlass import *
 @Gooey(program_name="Tile Strip", use_legacy_titles=True, required_cols=1, default_size=(800, 500))
 def param_parser():
     parser=GooeyParser(description="Tile Strip")
-    parser.add_argument("input_folder", metavar="Files", widget="DirChooser", help="Select input las/laz files", default='C:\\Users\\Manesha\\OneDrive - atlass.com.au\\Python\\Gui\\input\\180228_041704.las')
+    parser.add_argument("input_folder", metavar="Files", widget="DirChooser", help="Select input las/laz files", default=' ')
     parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='2000')
-    parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="C:\\Users\\Manesha\\OneDrive - atlass.com.au\\Python\\Gui\\output")
+    parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default=" ")
     parser.add_argument("cores", metavar="Number of Cores", help="Number of cores", type=int, default=4, gooey_options={
             'validator': {
                 'test': '2 <= int(user_input) <= 14',
