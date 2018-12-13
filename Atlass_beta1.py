@@ -1,10 +1,9 @@
-import Atlass
 import os
 import io
 import sys
 import glob
 from subprocess import Popen, PIPE
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, pool
 import time
 import datetime
 from contextlib import redirect_stderr, redirect_stdout
@@ -219,6 +218,7 @@ class AtlassTile():
 
 
         return neighbours
+    
     @property
     def name(self):
         return self._params['name']
@@ -230,7 +230,6 @@ class AtlassTile():
         else:
             raise TypeError('only accepts strings') 
 
-
     @property
     def xmin(self):
         return self._params['xmin']
@@ -241,8 +240,6 @@ class AtlassTile():
             self._params['xmin']=float(value)
         else:
             raise TypeError('only accepts floats or integers') 
-
-
     @property
     def ymin(self):
         return self._params['ymin']
@@ -505,104 +502,50 @@ class Atlasslogger(list):
         json.dump(dumps, self.jlog, indent=4)
 
 
-class AtlassWorkerProcess():
-    def __init__(self, input, output):
-        self.inputQ = input
-        self.outputQ = output
-        self.run()
-   
-    def run(self): 
-        try:
-            for func, args in iter(self.inputQ.get,'STOP'):
-                result = func(*args)
-                self.outputQ.put(result)
-        except:
-            print( "Worker Process: Unable to process \n",)
+class AtlassTask():
+    '''
+    Stores task related data that is used during multiprocessing
+    '''
+    def __init__(self,name,func,*args,**kwargs):
+        self.name=name
+        self.func=func
+        self.success=False
+        self.log=None
+        self.result=None
+        self.args=args
+        self.kwargs=kwargs
 
-        return self.outputQ
+    def __repr__(self):
+        return 'Task object:\n\n\nTask({0},{1},{2})\n\nStatus: {3} {4}\n\nLog:{5}'.format(self.name,self.args,self.kwargs,self.success, self.result,self.log)
+
+
 
 class AtlassTaskRunner():
 
-    failedscript = False
-
-    def __init__(self,cores, tasks, name, logger, args):
-        self.cores = cores
-        self.tasks = tasks
-        self.name = name
-        self.results = []
-        self.logger = logger
-        self.args = args
-        self.resultpertask = []
-        self.success = 0
-        self.fail = 0
-
-        self.run()
-
-    def resultsCalc(self, result):
+    def __init__(self):
         pass
 
-    def run(self):
-        self.time = strftime("%Y-%m-%dT%H:%M:%S")
-        if self.tasks==None:
-            return -1
-        self.logger.PrintMsg("Running AtlassTaskRunner\n", "Task Runner")
-        number_of_processes=min(self.cores, len(self.tasks))  
-        
-        # Create queues
-        task_queue = Queue()
-        done_queue = Queue()
 
-        # Submit tasks
-        for task in self.tasks:
-            task_queue.put(task)
+    def taskmanager(task):
+        '''
+        Runs the function specified in the task
+        Functions need to return (sucess, result, log)
+        '''
+        log='\n------------------------------------------------------------------------------------------------------\n'
+        log=log+ '{0}: {1}({2},{3})\n'.format(task.name,task.func.__name__,task.args,task.kwargs)
+        log=log+'Process started: {0}\n'.format(time.ctime( time.time()))
 
-        # Start worker processes
-        self.logger.PrintMsg('Setting up {0} tasks in {1} parallel processes\n'.format(len(self.tasks),number_of_processes))
-        
-        for i in range(number_of_processes):
-            try:
-                Process(target=AtlassWorkerProcess, args=(task_queue, done_queue)).start()
-            except:
-                self.logger.PrintMsg('Exception on start\n')
-                pass
-            
-            
-        # Get and print results
+        #run the task
+        task.success,task.result,task.log=task.func(*task.args,**task.kwargs)
 
-        self.logger.PrintMsg("Unordered results:{0}\n".format(self.name))
-        for i in range(len(self.tasks)):
-            try:
-                result =done_queue.get()
-                if not result==None:
-                    #self.logger.write('{}'.format(result))
-                    self.results.append(result)
-            except:
-                self.logger.PrintMsg('Exception on get results')
-                pass
-       
-        #result_list = [x.recv() for x in  done_queue]
-        #Tell child processes to stop  
-        self.logger.PrintMsg('Closing {0} parallel processes\n'.format(number_of_processes))
-        for i in range(number_of_processes):
-            try:
-                task_queue.put('STOP')
-            except:
-                print('Exception on stop')
-        self.logger.PrintMsg("Printing Results at the end TaskRunner.\n\n")
+        log=log+ task.log +'\n\n'
+        log=log+'Success:{0}\n'.format(task.success)
+        log=log+'Process ended: {0}\n'.format(time.ctime( time.time()))
+        log=log + '------------------------------------------------------------------------------------------------------\n'
 
-        for result in self.results:
-            if result['state'] == "Success":
-                self.success += 1
-            else:
-                self.fail += 1
-                AtlassTaskRunner.failedscript = True
+        task.log=log
 
-            self.resultpertask.append({'Tile':result['file'],'state':result['state'],'output':result['output'] })
-
-
-        self.logger.CreateLog(self.name, self.args, self.time, self.success, self.fail, self.resultpertask)
-        self.logger.flush
-        return self.results
+        return task
 
 class AtlassGen():
 
