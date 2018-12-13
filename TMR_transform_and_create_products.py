@@ -58,7 +58,13 @@ def asciigridtolas(input, output , filetype, nofiles, i):
        #las2las -i <dtmfile> -olas -o <dtmlazfile>
         subprocessargs=['C:/LAStools/bin/las2las.exe','-i', input, '-o{0}'.format(filetype), '-o', output, '-rescale', 0.001, 0.001, 0.001] 
         subprocessargs=list(map(str,subprocessargs)) 
-        subprocess.call(subprocessargs) 
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
+
     except:
         log ='Converting {} file  to {} Failed at exception'.format(input, filetype)
         return (False, output, log)
@@ -124,7 +130,7 @@ def makeDEM(xmin, ymin, xmax, ymax, gndfile, workdir, dtmfile, buffer, kill, ste
             gndfile=os.path.join(workdir,'{0}_{}_dem_hydro.{1}'.format(xmin, ymin,filetype)).replace('\\','/')
             subprocessargs=['C:/LAStools/bin/las2las.exe','-i', gndfile2,'-merged','-o{0}'.format(filetype),'-o',gndfile] + keep 
             subprocessargs=list(map(str,subprocessargs))
-            subprocess.call(subprocessargs)    
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
             print("added Hydro points")
 
         else:
@@ -135,7 +141,12 @@ def makeDEM(xmin, ymin, xmax, ymax, gndfile, workdir, dtmfile, buffer, kill, ste
         subprocessargs=subprocessargs+['-ll',xmin,ymin,'-ncols',math.ceil((xmax-xmin)/step), '-nrows',math.ceil((ymax-ymin)/step)]    
         #ensures the tile is not buffered by setting lower left coordinate and num rows and num cols in output grid.
         subprocessargs=list(map(str,subprocessargs))  
-        subprocess.call(subprocessargs) 
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
 
 
     except:
@@ -161,7 +172,7 @@ def adjust(input, output, dx, dy, dz, epsg, filetype, nofiles, i):
     try:
         subprocessargs=['C:/LAStools/bin/las2las.exe', '-i' , input ,'-o{0}'.format(filetype), '-translate_xyz', dx, dy, dz, '-epsg', epsg ,'-set_version', 1.2,  '-o', output]
         subprocessargs=list(map(str,subprocessargs))
-        subprocess.call(subprocessargs) 
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
         if os.path.isfile(output):
             log = "Adjusting {0} output : {1}".format(str(input), str(output))
             return (True,output, log)
@@ -169,6 +180,10 @@ def adjust(input, output, dx, dy, dz, epsg, filetype, nofiles, i):
         else:
             log = "Could not adjust : {0}".format(str(input))
             return (False,None,log)
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
 
     except:
         log = "Could not adjust {0}. Failed at Subprocess".format(str(input))
@@ -184,7 +199,12 @@ def makeXYZ(input, output, filetype, nofiles, i):
     try:
         subprocessargs=['C:/LAStools/bin/las2las.exe','-i', input, '-otxt','-o', output, '-rescale', 0.001, 0.001, 0.001]
         subprocessargs=list(map(str,subprocessargs)) 
-        subprocess.call(subprocessargs)
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
 
     except:
         log = 'Could not make xyz {0}. Failed at Subprocess'.format(str(input))
@@ -201,11 +221,19 @@ def makeXYZ(input, output, filetype, nofiles, i):
 
 def index(input, nofiles, i):
     print('\nIndexing  {0}/{1}'.format(i, nofiles))
+   
+    log = ''
     try:
         subprocessargs=['C:/LAStools/bin/lasindex.exe','-i', input]
         subprocessargs=list(map(str,subprocessargs)) 
-        subprocess.call(subprocessargs)
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
         return(True, None, "Success")
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
+
     except:
         return(False, None, "Error")
 
@@ -222,18 +250,22 @@ def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, bu
         subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+input+['-merged','-o{0}'.format(filetype),'-o',tempfile,'-keep_class'] + gndclasses
         subprocessargs=subprocessargs+['-keep_xy',tile.xmin-buffer,tile.ymin-buffer,tile.xmax+buffer,tile.ymax+buffer]
         subprocessargs=list(map(str,subprocessargs)) 
-        subprocess.call(subprocessargs)
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
     
 
         subprocessargs=['C:/LAStools/bin/lasthin.exe','-i',tempfile,'-o{0}'.format(filetype),'-o',tempfile2,'-adaptive',vt,hz,'-set_classification',8]
         subprocessargs=list(map(str,subprocessargs))    
-        subprocess.call(subprocessargs)  
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
 
         subprocessargs=['C:/LAStools/bin/las2las.exe','-i',tempfile2,'-o{0}'.format(filetype),'-o',output]
         subprocessargs=subprocessargs+['-keep_xy',tile.xmin,tile.ymin,tile.xmax,tile.ymax]
         subprocessargs=list(map(str,subprocessargs))    
-        subprocess.call(subprocessargs)  
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
 
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
 
     except Exception as e:
         log = "Making MKP for {0} /nException {1}".format(tile.name, e)
@@ -260,7 +292,7 @@ def clip(input, output, poly, filetype , nofiles, i):
     try:
         subprocessargs=['C:/LAStools/bin/lasclip.exe', '-i','-use_lax' ] + input + [ '-merged', '-poly', poly, '-o', output, '-o{0}'.format(filetype)]
         subprocessargs=list(map(str,subprocessargs))    
-        subprocess.call(subprocessargs) 
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
         if os.path.isfile(output):
             log = "Clipping {0} output : {1}".format(str(input), str(output)) 
             return (True,output, log)
@@ -269,6 +301,10 @@ def clip(input, output, poly, filetype , nofiles, i):
             log = "Clipping failed for {0}. ".format(str(input)) 
             return (False,None,log)
 
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
 
     except:
         log = "Clipping failed for {0}. Failed at Subprocess ".format(str(input)) 
@@ -282,7 +318,13 @@ def makegrid(input, output, intensityMin,intensityMax, nofiles, i):
     try:
         subprocessargs=['C:/LAStools/bin/lasgrid.exe', '-i', input, '-step', 0.5, '-fill' ,2 ,'-keep_first', '-intensity_average', '-otif', '-nbits', 8 ,'-set_min_max', intensityMin , intensityMax, '-o', output, '-nrows', 2000, '-ncols', 2000]
         subprocessargs=list(map(str,subprocessargs)) 
-        subprocess.call(subprocessargs)  
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
+
     except:
         log = 'Could not make grid {0}, Failed at Subprocess'.format(str(input))  
         return (False,None, log)
