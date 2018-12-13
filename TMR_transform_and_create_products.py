@@ -47,12 +47,11 @@ def param_parser():
 #-----------------------------------------------------------------------------------------------------------------
 #Function definitions
 #-----------------------------------------------------------------------------------------------------------------
-def asciigridtolas(input, output , filetype, nofiles, i):
+def asciigridtolas(input, output , filetype):
     '''
     Converts an ascii file to a las/laz file and retains the milimetre precision.
     '''
 
-    print('\nConverting ASCI to {0} : {1}/{2}'.format(filetype, i, nofiles))
     log = ''
     try:
        #las2las -i <dtmfile> -olas -o <dtmlazfile>
@@ -109,12 +108,11 @@ def transformlas(infile,outfile,x=0,y=0,z=0,outformat='las'):
         else:
             return None
 
-def makeDEM(xmin, ymin, xmax, ymax, gndfile, workdir, dtmfile, buffer, kill, step, gndclasses, hydropoints, filetype, poly,areaname, nofiles, i):
+def makeDEM(xmin, ymin, xmax, ymax, gndfile, workdir, dtmfile, buffer, kill, step, gndclasses, hydropoints, filetype, poly,areaname):
     #need tilelayout to get 200m of neighbours Save the merged buffered las file to <inputpath>/Adjusted/Working
     #use this file for MKP, just remember to remove buffer
     #This will need clipping to AOI
     log = ''
-    print('\nMaking DEM for : {0}/{1}'.format(i, nofiles))
     #Prep RAW DTM
     
     #set up clipping    
@@ -164,11 +162,10 @@ def makeDEM(xmin, ymin, xmax, ymax, gndfile, workdir, dtmfile, buffer, kill, ste
             log = 'DEM creation Failed for: {0}_{1}.'.format(xmin, ymin)
             return(False, None, log)
 
-def adjust(input, output, dx, dy, dz, epsg, filetype, nofiles, i):
+def adjust(input, output, dx, dy, dz, epsg, filetype:
     #las2las -i <inputpath>/<name>.laz -olas -translate_xyz <dx> <dy> <dz> -epsg <epsg> -olas -set_version 1.2 -point_type 1 -o <inputpath>/Adjusted/<name>.las
     log=''
- 
-    print('\nAdjusting : {0}/{1}'.format(i,nofiles))
+
     try:
         subprocessargs=['C:/LAStools/bin/las2las.exe', '-i' , input ,'-o{0}'.format(filetype), '-translate_xyz', dx, dy, dz, '-epsg', epsg ,'-set_version', 1.2,  '-o', output]
         subprocessargs=list(map(str,subprocessargs))
@@ -189,12 +186,10 @@ def adjust(input, output, dx, dy, dz, epsg, filetype, nofiles, i):
         log = "Could not adjust {0}. Failed at Subprocess".format(str(input))
         return (False,None,log)
 
-def makeXYZ(input, output, filetype, nofiles, i):
+def makeXYZ(input, output, filetype):
     #las2las -i <inputpath>/Products/<Area_Name>_DEM_1m_ESRI/<Name>_2018_SW_<X>_<Y>_1k_1m_esri.asc -otxt -o <inputpath>/Products/<Area_Name>_DEM_1m/<Name>_2018_SW_<X>_<Y>_1k_1m.xyz -rescale 0.001 0.001 0.001
 
     #Prep RAW DTM
-    print('\nMaking XYZ for :  {0}/{1}'.format(i, nofiles))
-
     log = ''
     try:
         subprocessargs=['C:/LAStools/bin/las2las.exe','-i', input, '-otxt','-o', output, '-rescale', 0.001, 0.001, 0.001]
@@ -219,8 +214,7 @@ def makeXYZ(input, output, filetype, nofiles, i):
             log = 'Could not make xyz {0}'.format(str(input))           
             return (False,None, log)
 
-def index(input, nofiles, i):
-    print('\nIndexing  {0}/{1}'.format(i, nofiles))
+def index(input):
    
     log = ''
     try:
@@ -237,15 +231,14 @@ def index(input, nofiles, i):
     except:
         return(False, None, "Error")
 
-def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, buffer, tile, nofiles, i):
+def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, buffer, tile):
     log=''
     cleanup=[tempfile2]
 
 
     if isinstance(input,str):
         input = [input]
-    
-    print('\nMaking MKP for  {0}/{1}'.format(i, nofiles))
+
     try:
         subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+input+['-merged','-o{0}'.format(filetype),'-o',tempfile,'-keep_class'] + gndclasses
         subprocessargs=subprocessargs+['-keep_xy',tile.xmin-buffer,tile.ymin-buffer,tile.xmax+buffer,tile.ymax+buffer]
@@ -284,8 +277,8 @@ def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, bu
             log = "Making MKP for {} Failed".format(tile.name)
             return (False,None, log)
 
-def clip(input, output, poly, filetype , nofiles, i):
-    print('\nClipping : {0}/{1}'.format(i, nofiles))
+def clip(input, output, poly, filetype):
+
     if isinstance(input,str):
         input = [input]
     log=''
@@ -310,11 +303,10 @@ def clip(input, output, poly, filetype , nofiles, i):
         log = "Clipping failed for {0}. Failed at Subprocess ".format(str(input)) 
         return(False, None, log)
 
-def makegrid(input, output, intensityMin,intensityMax, nofiles, i):
+def makegrid(input, output, intensityMin,intensityMax):
  
     log = ''
 
-    print('\nMaking Grid for  {0}/{1}'.format(i, nofiles))
     try:
         subprocessargs=['C:/LAStools/bin/lasgrid.exe', '-i', input, '-step', 0.5, '-fill' ,2 ,'-keep_first', '-intensity_average', '-otif', '-nbits', 8 ,'-set_min_max', intensityMin , intensityMax, '-o', output, '-nrows', 2000, '-ncols', 2000]
         subprocessargs=list(map(str,subprocessargs)) 
@@ -413,8 +405,8 @@ def main():
     ###########################################################################################################################
     #Adjust las
     adj_tasks = {}
-    i =0
-    
+
+    print("Applying x,y,z adjustments")
     for file in files:
 
         path, filename, ext = AtlassGen.FILESPEC(file)
@@ -424,8 +416,8 @@ def main():
         #finalnames[filename]['ESRI_GRID']='{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.las'.format()
         
         output = os.path.join(adjdir, '{0}.{1}'.format(filename, ext)).replace("\\", "/")
-        i +=1      
-        adj_tasks[filename] = AtlassTask(filename, adjust, file, output, dx, dy, dz, epsg, filetype, nofiles, i )
+     
+        adj_tasks[filename] = AtlassTask(filename, adjust, file, output, dx, dy, dz, epsg, filetype)
 
 
 
@@ -434,7 +426,7 @@ def main():
 
     ###########################################################################################################################
     #las index
-    i=0
+
     print("Starting Indexing the adjusted Files")
     index_tasks = {}
     for result in adjust_results:
@@ -443,8 +435,8 @@ def main():
             file = result.result
             path, filename, ext = AtlassGen.FILESPEC(file)
             x,y=filename.split('_') 
-            i+=1
-            index_tasks[filename] = AtlassTask(filename, index, file, nofiles, i)
+
+            index_tasks[filename] = AtlassTask(filename, index, file)
     
 
     index_results=p.map(AtlassTaskRunner.taskmanager,index_tasks.values())
@@ -460,7 +452,7 @@ def main():
     '''
     print('Clipping adjusted files to the AOI')
     clip_task = {}
-    i=0
+
     for result in adjust_results:
  
         if result.success:
@@ -470,8 +462,8 @@ def main():
             #files
             output = os.path.join(adjclippeddir, '{0}.{1}'.format(filename, filetype)).replace("\\", "/")
             input = os.path.join(adjdir, '{0}.{1}'.format(filename, filetype)).replace("\\", "/")
-            i +=1
-            clip_task[filename] = AtlassTask(filename, clip, input, output, poly, filetype, nofiles, i)
+
+            clip_task[filename] = AtlassTask(filename, clip, input, output, poly, filetype)
             #clip(input,output,poly,filetype)
             
 
@@ -481,7 +473,7 @@ def main():
     ###########################################################################################################################
     #MKP process
     #use names from clipped las to decide which tiles to generate mkp from unclipped adjusted las.
-    i=0
+
     print('\n\n Starting MKP')
     mkp_tasks = {}
     for result in clip_results:
@@ -514,14 +506,14 @@ def main():
 
                 if os.path.isfile(neighbour):
                     neighbourlasfiles.append(neighbour)
-            i +=1
-            mkp_tasks[tilename] = AtlassTask(tilename, makeMKP, neighbourlasfiles, bufferedfile, tempfile2, output, filetype, gndclasses, hz, vt, buffer, tile, nofiles, i)
+
+            mkp_tasks[tilename] = AtlassTask(tilename, makeMKP, neighbourlasfiles, bufferedfile, tempfile2, output, filetype, gndclasses, hz, vt, buffer, tile)
 
     mkp_results=p.map(AtlassTaskRunner.taskmanager,mkp_tasks.values())
 
     ###########################################################################################################################
     #las index mkp las files
-    i=0
+
     print("Starting MKP file Indexing")
     mkp_index_tasks = {}
     for result in mkp_results:
@@ -530,8 +522,8 @@ def main():
             file = result.result
             path, filename, ext = AtlassGen.FILESPEC(file)
             x,y=filename.split('_') 
-            i+=1
-            mkp_index_tasks[filename] = AtlassTask(filename, index, file, nofiles, i)
+
+            mkp_index_tasks[filename] = AtlassTask(filename, index, file)
     
    
     mkp_index_results=p.map(AtlassTaskRunner.taskmanager,mkp_index_tasks.values())
@@ -544,7 +536,7 @@ def main():
 
     print('Clipping MKP files to the AOI')
     clip_mkp_tasks = {}
-    i=0
+
     for result in mkp_index_results:
         log.write(result.log)        
         if result.success:
@@ -556,8 +548,8 @@ def main():
             input_mkp = result.result # mkp
             output = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, filetype)).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
             input=[input_adj, input_mkp] 
-            i+=1
-            clip_mkp_tasks[tilename] = AtlassTask(tilename, clip, input, output, poly, filetype, nofiles, i)
+
+            clip_mkp_tasks[tilename] = AtlassTask(tilename, clip, input, output, poly, filetype)
 
 
     clip_mkp_results=p.map(AtlassTaskRunner.taskmanager,clip_mkp_tasks.values())   
@@ -565,7 +557,7 @@ def main():
     ###########################################################################################################################
     #Make DEM with the adjusted las in the working directory
     #input buffered las file ?????
-    i=0
+
     print('Making DEM')
     dem_tasks = {}
     dem_results = []
@@ -578,8 +570,8 @@ def main():
             #files
             input=os.path.join(workingdir,'{0}_buff.{1}'.format(tilename, filetype)).replace('\\','/') # adjusted buffered las files
             output=os.path.join(dem1esridir,'{0}_2018_SW_{1}_{2}_1k_1m_esri.asc'.format(areaname, x, y)).replace('\\','/')
-            i+=1
-            dem_tasks[tilename] = AtlassTask(tilename, makeDEM, int(x), int(y), int(x)+tilesize, int(y)+tilesize, input, workingdir, output, buffer, kill, step, gndclasses, hydropointsfiles, filetype, poly,areaname, nofiles, i)
+
+            dem_tasks[tilename] = AtlassTask(tilename, makeDEM, int(x), int(y), int(x)+tilesize, int(y)+tilesize, input, workingdir, output, buffer, kill, step, gndclasses, hydropointsfiles, filetype, poly,areaname)
             
     
             #dem_results.append(makeDEM(int(x), int(y), int(x)+tilesize, int(y)+tilesize, input, workingdir, output, buffer, kill, step, gndclasses, hydropointsfiles, filetype, poly,areaname))
@@ -589,7 +581,7 @@ def main():
     ###########################################################################################################################
     #Convert asci to laz
     #asciigridtolas(dtmlazfile)
-    i=0
+
     print('Converting ASC to LAZ')
     asciigridtolas_tasks={}
     for result in dem_results:
@@ -603,8 +595,8 @@ def main():
             #files
             input=os.path.join(dem1esridir,'{0}_2018_SW_{1}_{2}_1k_1m_esri.asc'.format(areaname, x, y)).replace('\\','/')
             output=os.path.join(workingdir,'{0}_dem.{1}'.format(tilename, filetype)).replace('\\','/')
-            i+=1
-            asciigridtolas_tasks[tilename] = AtlassTask(tilename, asciigridtolas, input, output, filetype, nofiles, i)
+
+            asciigridtolas_tasks[tilename] = AtlassTask(tilename, asciigridtolas, input, output, filetype)
     
 
     asciigridtolas_results=p.map(AtlassTaskRunner.taskmanager,asciigridtolas_tasks.values())
@@ -614,7 +606,7 @@ def main():
     ###########################################################################################################################
     #Index the DEM laz files
     #index(demlazfile)
-    i=0
+
     print('Indexing DEM files')
     index_dem_tasks={}
     for result in asciigridtolas_results:
@@ -622,8 +614,8 @@ def main():
         if result.success:
             tilename = result.name
             x,y=tilename.split('_') 
-            i+=1
-            index_dem_tasks[tilename] = AtlassTask(tilename, index, file, nofiles, i)
+
+            index_dem_tasks[tilename] = AtlassTask(tilename, index, file)
     
  
     index_dem_results=p.map(AtlassTaskRunner.taskmanager,index_dem_tasks.values())
@@ -633,7 +625,7 @@ def main():
     ###########################################################################################################################
     #Clipping the DEM las files to the AOI
     #lasclip demlazfile
-    i=0
+
     print('Clipping the DEM files to AOI')
     clip_demlaz_tasks = {}
 
@@ -646,15 +638,15 @@ def main():
             #files 
             input=os.path.join(workingdir,'{0}_dem.{1}'.format(tilename, filetype)).replace('\\','/') #dtmlaz
             output = os.path.join(adjdemclippeddir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')
-            i+=1
-            clip_demlaz_tasks[tilename] = AtlassTask(tilename, clip, input, output, poly, filetype, nofiles, i)
+
+            clip_demlaz_tasks[tilename] = AtlassTask(tilename, clip, input, output, poly, filetype)
 
     clip_demlaz_results=p.map(AtlassTaskRunner.taskmanager,clip_demlaz_tasks.values())   
 
     ###########################################################################################################################
     #MAKE XYZ from the dtm asci file, output xyz file in Products/<Area_Name>_DEM_1m/<Name>_2018_SW_<X>_<Y>_1k_1m.xyz
     #makexyz
-    i=0
+
     print('Making XYZ files')
     xyz_tasks = {}
     for result in clip_demlaz_results:
@@ -668,8 +660,7 @@ def main():
             input=os.path.join(dem1esridir,'{0}_2018_SW_{1}_{2}_1k_1m_esri.asc'.format(areaname, x, y)).replace('\\','/') #dtm asci file
             output = os.path.join(dem1dir,'{0}_2018_SW_{1}_{2}_1k_1m.xyz'.format(areaname, x, y)).replace('\\','/')
 
-            i+=1
-            xyz_tasks[tilename] = AtlassTask(tilename, makeXYZ, input, output, filetype, nofiles, i)
+            xyz_tasks[tilename] = AtlassTask(tilename, makeXYZ, input, output, filetype)
 
 
     xyz_results=p.map(AtlassTaskRunner.taskmanager,xyz_tasks.values())   
@@ -681,7 +672,7 @@ def main():
     ###########################################################################################################################
     #MAKE GRID from the AHD las files, output tif file
     #makexyz
-    i=0
+
     print('Making Grid')
     grid_tasks = {}
     for result in clip_demlaz_results:
@@ -695,8 +686,7 @@ def main():
             input = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, filetype)).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
             output = os.path.join(intensitydir,'{0}_2018_SW_{1}_{2}_1k_50cm_INT.tif'.format(areaname, x, y)).replace("\\", "/")   #<inputpath>/Products/<Area_Name>_Intensity_50cm/<Name>_2018_SW_<X>_<Y>_1k_50cm_INT.tif
 
-            i+=1
-            grid_tasks[tilename] = AtlassTask(tilename, makegrid, input, output, intensityMin,intensityMax, nofiles, i)
+            grid_tasks[tilename] = AtlassTask(tilename, makegrid, input, output, intensityMin,intensityMax)
 
 
     grid_results=p.map(AtlassTaskRunner.taskmanager,grid_tasks.values())   
