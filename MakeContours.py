@@ -5,12 +5,13 @@ import sys
 import os
 from gooey import Gooey, GooeyParser
 import subprocess
-from Atlass import *
 import datetime
 from time import strftime
 from shutil import copyfile
 import glob
-
+from multiprocessing import Pool,freeze_support
+sys.path.append('{0}/lib/atlass/'.format(sys.path[0]))
+from Atlass_beta1 import *
 #-----------------------------------------------------------------------------------------------------------------
 #Gooey input
 #-----------------------------------------------------------------------------------------------------------------
@@ -19,11 +20,12 @@ import glob
 def param_parser():
     parser=GooeyParser(description="Make Contour")
     parser.add_argument("inputfolder", metavar="Contour Points Folder", widget="DirChooser", help="Select input files (.las/.laz)", default='')
-    parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='las')
+    parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
     parser.add_argument("layoutfile", metavar="TileLayout file", widget="FileChooser", help="TileLayout file(.json)", default='')
     #parser.add_argument("hydrofiles", metavar="Hydro LAS files", widget="MultiFileChooser", help="Select Hydro files (las/laz )", default='')
     parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
     parser.add_argument("aoi", metavar="AOI", widget="FileChooser", help="Area of interest(.shp file)", default="")
+    parser.add_argument("tilesize", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
     parser.add_argument("contourinterval", metavar="Contour interval", help="Provide contour interval", default='0.5')
     parser.add_argument("indexinterval", metavar="Index Interval", help="Provide interval for contour index", default='5')
     parser.add_argument("zone", metavar="Zone", help="Provide Zone", default='')
@@ -37,16 +39,16 @@ def param_parser():
 #Function definitions
 #-----------------------------------------------------------------------------------------------------------------
 
-def makegmsfiles(filename,inpath,gms,buffout,clipout,xmin,ymin,xmax,ymax, zone, AOI_clip, index):
+def makegmsfiles(filename,inpath,outpath,buffoutpath,clipoutpath,xmin,ymin,zone, AOI_clip, index, tilesize):
 
     template = "\\\\10.10.10.100\\projects\\PythonScripts\\templates\\Template.gms"
-    dstfile = os.path.join(gms,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
-    gms = gms+"\\"
-    buffout = buffout+"\\"
+    dstfile = os.path.join(outpath,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
+    outputpath = outpath+"\\"
+    buffout = buffoutpath+"\\"
     inpath = inpath+"\\"
-    clipout = clipout+"\\"
+    clipout = clipoutpath+"\\"
     copyfile(template, dstfile)
-    result = {}
+    log = ''
 
     try:
         with open(dstfile, 'r') as g:
@@ -55,7 +57,7 @@ def makegmsfiles(filename,inpath,gms,buffout,clipout,xmin,ymin,xmax,ymax, zone, 
             while '<Filename>' in data:
                 data = data.replace('<Filename>', filename)
             while '<Outpath>' in data:
-                data = data.replace('<Outpath>', gms)
+                data = data.replace('<Outpath>', outpath)
             while '<InPath>' in data:
                 data = data.replace('<InPath>', inpath)
             while '<BuffOutpath>' in data:
@@ -67,61 +69,83 @@ def makegmsfiles(filename,inpath,gms,buffout,clipout,xmin,ymin,xmax,ymax, zone, 
             while '<AOI_clip>' in data:
                 data = data.replace('<AOI_clip>', AOI_clip)
             while '<xmin>' in data:
-                data = data.replace('<xmin>', xmin)
+                data = data.replace('<xmin>', str(xmin))
             while '<ymin>' in data:
-                data = data.replace('<ymin>', ymin)
+                data = data.replace('<ymin>', str(ymin))
             while '<xmax>' in data:
-                data = data.replace('<xmax>', xmax)
+                data = data.replace('<xmax>', str(xmin+tilesize))
             while '<ymax>' in data:
-                data = data.replace('<ymax>', ymax)
+                data = data.replace('<ymax>', str(ymin+tilesize))
             while '<index>' in data:
                 data = data.replace('<index>', index)
 
         with open(dstfile, 'w') as f:
                 f.write(data)
         if os.path.exists(dstfile):
-            result = {"file":filename, "state" :"Success", "output":dstfile }
+            log = 'Successfully created GMS file for :{0}'.format(filename)
+            return(True,dstfile,log)
         else:
-            result = {"file":filename, "state" :"Error", "output":"Could not generate GMS for : {0}".format(filename) }
+            log = 'Could not create GMS file for :{0}'.format(filename)
+            return(False,None,log)
     except:
-        result = {"file":filename, "state" :"Error", "output":"Could not generate GMS for : {0}".format(filename) }
+        log = 'Could not create GMS file for :{0}, Failed at exception'.format(filename)
+        return(False,None,log)
 
 
 
-    return(result)
+
 
 
 def rungmsfiles(gmpath, gmsfile):
-    results = {}
+    log = ''
 
     try:
         subprocessargs=[gmpath, gmsfile]
-        subprocessargs=map(str,subprocessargs) 
-        subprocess.call(subprocessargs)
-        result = {"file":gmsfile, "state":"Success", "output" : "" }
+        subprocessargs=list(map(str,subprocessargs))
+        print(subprocessargs)
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+        log = 'Making Contours was successful for {0}'.format(gmsfile)
+        return (True,None, log)
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (True,None,log)
+
     except:
-        result = {"file":gmsfile, "state":"Error", "output": "Could not run gms file"}
+        log = 'Could not run GMS file for {0}, Failed at Subprocess'.format(gmsfile)  
+        return (False,None, log)
 
-    return(result)
 
-
-def makecontours(tile, buffer, neighbourfiles, contourinterval, outpath):
-    result = {}
+def makecontours(neighbourfiles, output, x, y, filename, buffer, contourinterval, tilesize):
+    log = ''
     #set up clipping
-    keep='-keep_xy {0} {1} {2} {3}'.format(tile.xmin-buffer,tile.ymin-buffer,tile.xmax+buffer,tile.ymax+buffer)
+    keep='-keep_xy {0} {1} {2} {3}'.format(x-buffer, y-buffer, x+tilesize+buffer, y+tilesize+buffer)
     keep=keep.split()
 
-    outfile = os.path.join(outpath,'{0}.{1}'.format(tile.name,'shp')).replace('\\','/')
     try:
-        subprocessargs=['C:/LAStools/bin/blast2iso.exe','-i'] + neighbourfiles + ['-merged','-oshp', '-iso_every', contourinterval,'-clean',2,'-o',outfile] + keep 
-        subprocessargs=map(str,subprocessargs) 
-        subprocess.call(subprocessargs)
+        subprocessargs=['C:/LAStools/bin/blast2iso.exe','-i'] + neighbourfiles + ['-merged','-oshp', '-iso_every', contourinterval,'-clean',2,'-o',output] + keep 
+        subprocessargs=list(map(str,subprocessargs))
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
 
-        result = {"file":tile.name, "state":"Success", "output" : outfile }
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
+
     except:
-        result = {"file":tile.name, "state":"Error", "output": "Could not make contour"}
+        log = 'Could not make countours {0}, Failed at Subprocess'.format(filename)  
+        return (False,None, log)
 
-    return(result)
+    finally:
+        if os.path.isfile(output):
+            log = 'Making Contours was successful for {0}'.format(filename)
+            return (True,output, log)
+
+        else:
+            log = 'Could not make contours for {0}'.format(filename)   
+            return (False,None, log)
+
 
 
    
@@ -140,11 +164,12 @@ def main():
     #hydrofiles = args.hydrofiles
     aoi = args.aoi
     zone = args.zone
-    gmexe = args.gmexe
+    gmexe = args.gmexe.replace('\\','/')
     buffer = args.buffer
     cores = args.cores
     contourinterval = args.contourinterval
     index = float(contourinterval)*(float(args.indexinterval))
+    tilesize = args.tilesize
 
     al = Atlasslogger(outpath)
 
@@ -157,49 +182,59 @@ def main():
 
     dt = strftime("%y%m%d_%H%M")
 
-    contour_buffered_out = AtlassGen.makedir(os.path.join(outpath, (dt+'_contour_buffered')))
-    gms = AtlassGen.makedir(os.path.join(contour_buffered_out, 'scripts'))
-    bufferedout = AtlassGen.makedir(os.path.join(contour_buffered_out, ('buffered_{0}m_contours'.format(buffer))))
-    clippedout = AtlassGen.makedir(os.path.join(contour_buffered_out, ('clipped'.format(buffer))))
+    contour_buffered_out_path = AtlassGen.makedir(os.path.join(outpath, (dt+'_contour_buffered')))
+    gms_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'scripts'))
+    bufferedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, ('buffered_{0}m_contours'.format(buffer))))
+    clippedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, ('clipped'.format(buffer))))
 
-    MAKE_CONTOUR_TASKS=[]
-    MAKE_GMSFILE_TASKS=[]
-    RUN_GMSFILE_TASKS=[]
-
+    #Make Contour Files
+    mk_contour_tasks = {}
     for contourfile in contourfiles:
         path, filename, ext = AtlassGen.FILESPEC(contourfile)
+        x,y=filename.split('_')
         tile = tilelayout.gettile(filename)
-        
+        #file
+        output = os.path.join(contour_buffered_out_path,'{0}.{1}'.format(tile.name,'shp')).replace('\\','/')
         neighbourfiles = []
         neighbours = tile.getneighbours(buffer)
         for neighbour in neighbours:
             neighbourfiles.append(os.path.join(path,'{0}.{1}'.format(neighbour,ext)).replace('\\','/'))
+
+        mk_contour_tasks[filename] = AtlassTask(filename, makecontours, neighbourfiles, output, int(x), int(y), filename, int(buffer), contourinterval, int(tilesize))        
         
-        MAKE_CONTOUR_TASKS.append((makecontours,(tile, buffer, neighbourfiles, contourinterval, contour_buffered_out)))
-        MAKE_GMSFILE_TASKS.append((makegmsfiles,(filename,contour_buffered_out,gms,bufferedout,clippedout,str(tile.xmin),str(tile.ymin),str(tile.xmax),str(tile.ymax), zone, aoi, str(index))))
-        gmscript = os.path.join(gms,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
-        RUN_GMSFILE_TASKS.append((rungmsfiles,(gmexe,gmscript)))
+    p=Pool(processes=cores)      
+    mk_contour_results=p.map(AtlassTaskRunner.taskmanager,mk_contour_tasks.values())
+
+
+    #Make GMS files
+    mk_gmsfiles_tasks = {}
+    for result in mk_contour_results:
+        print(result.success, result.log)
+        path, filename, ext = AtlassGen.FILESPEC(result.result)
+        x,y=filename.split('_')
+
+        mk_gmsfiles_tasks[filename] = AtlassTask(filename, makegmsfiles,filename,contour_buffered_out_path,gms_path,bufferedout_path,clippedout_path,int(x),int(y), zone, aoi, index, int(tilesize))
     
-    #Multiprocess the tasks   
-    atr1 = AtlassTaskRunner(cores,MAKE_CONTOUR_TASKS,'Making Contours', al, str(args))
-
-    if not atr1.failedscript:
-        atr2 = AtlassTaskRunner(cores,MAKE_GMSFILE_TASKS,'Making Global Mapper Scripts', al, str(args))
-    else:
-        al.PrintMsg("Making Countours Failed. Aborting Program", "ERROR")
-        al.DumpLog();
-        exit
     
-    if not atr2.failedscript:
-        atr3 = AtlassTaskRunner(cores,RUN_GMSFILE_TASKS,'Running Global Mapper Scripts', al, str(args))
-        
-    else:
-        al.PrintMsg("Running GMS Failed. Aborting Program", "ERROR")
-        al.DumpLog();
-        exit
+    mk_gmsfiles_results=p.map(AtlassTaskRunner.taskmanager,mk_gmsfiles_tasks.values())
 
-    al.DumpLog();
 
+    #Run GMS files
+    run_gmsfiles_tasks = {}
+    for result in mk_gmsfiles_results:
+        print(result.result, result.log)
+        path, filename, ext = AtlassGen.FILESPEC(result.result)
+        #files
+        gmscript = os.path.join(gms_path,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
+
+        run_gmsfiles_tasks[filename] = AtlassTask(filename, rungmsfiles, gmexe, gmscript)
+
+    run_gmsfiles_results=p.map(AtlassTaskRunner.taskmanager,run_gmsfiles_tasks.values())
+
+    #Verify final results
+    for result in run_gmsfiles_results:
+        print(result.result, result.log)
+    
     return
 
 if __name__ == "__main__":

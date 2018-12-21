@@ -175,7 +175,7 @@ class Ui_MainWindow(object):
         self.actionProject_Meta_Data.setText(_translate("MainWindow", "Project Meta Data"))
 
     def actionLoad_Project():
-        s
+        print("Load file")
     
 if __name__ == "__main__":
     import sys

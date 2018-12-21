@@ -13,7 +13,9 @@ import time
 from collections import defaultdict 
 from collections import OrderedDict 
 from gooey import Gooey, GooeyParser
-from Atlass import *
+from multiprocessing import Pool,freeze_support
+sys.path.append('{0}/lib/atlass/'.format(sys.path[0]))
+from Atlass_beta1 import *
 
 #-----------------------------------------------------------------------------------------------------------------
 #Development Notes
@@ -38,16 +40,16 @@ from Atlass import *
 @Gooey(program_name="Tile Strip", use_legacy_titles=True, required_cols=1, default_size=(800, 500))
 def param_parser():
     parser=GooeyParser(description="Tile Strip")
-    parser.add_argument("input_folder", metavar="Files", widget="DirChooser", help="Select input las/laz files", default=' ')
-    parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='2000')
-    parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default=" ")
+    parser.add_argument("input_folder", metavar="Files", widget="DirChooser", help="Select input las/laz files", default='D:\\Python\\Gui\\input')
+    parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
+    parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="D:\\Python\\Gui\\output")
     parser.add_argument("cores", metavar="Number of Cores", help="Number of cores", type=int, default=4, gooey_options={
             'validator': {
                 'test': '2 <= int(user_input) <= 14',
                 'message': 'Must be between 2 and 14'
             }})
     parser.add_argument("output_file", metavar="Output File Name", help="Provide name for outputfile", default="TileLayout.json")
-    parser.add_argument("file_type",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='las')
+    parser.add_argument("file_type",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
     args = parser.parse_args()
     return args
 
@@ -56,48 +58,72 @@ def param_parser():
 #-----------------------------------------------------------------------------------------------------------------
 
 
-def TileStrip(file,outpath,tilesize,filetype):    
-    filepath,filename,extn=AtlassGen.FILESPEC(file)  
-    tilepath=AtlassGen.makedir(os.path.join(outpath,filename))
+def TileStrip(input, outputpath, tilesize,filetype):    
+    log = ''
 
     try:
-        subprocessargs=['C:/LAStools/bin/lasindex.exe','-i',file] 
-        subprocessargs=map(str,subprocessargs)    
-        subprocess.call(subprocessargs) 
-        subprocessargs=['C:/LAStools/bin/lastile.exe','-i',file,'-o{0}'.format(filetype),'-odir',tilepath,'-tile_size',tilesize] 
-        subprocessargs=map(str,subprocessargs)    
-        subprocess.call(subprocessargs)    
-        files=AtlassGen.FILELIST(os.path.join(tilepath,'*.{0}'.format(filetype)))
-        print('Tile strip completed')
-        result = {"file":filename, "state" :"Success", "output":"Tile Striped" }
 
-    except:
-        result = {"file":filename, "state" :"Fail", "output":"Tile Could not be striped" }
+        subprocessargs=['C:/LAStools/bin/lasindex.exe','-i',input] 
+        subprocessargs=list(map(str,subprocessargs))    
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
 
-    return result
+
+        subprocessargs=['C:/LAStools/bin/lastile.exe','-i',input,'-o{0}'.format(filetype),'-odir',outputpath,'-tile_size',tilesize] 
+        subprocessargs=list(map(str,subprocessargs))    
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        return (False,None,log)
+
+    except Exception as e:
+        log = "\n TileStrip {0} \n Exception {1}".format(input, e)
+        return(False,None, log)
     
-def MergeTiles(file,files,filetype):    
+    finally:
+        outputfiles = glob.glob(outputpath+"\\*."+filetype)
+        print('\nTiling completed for {0}, generated {1}\n{2}'.format(input, len(outputfiles), list(outputfiles)))
+        log = '\nTiling completed for {0}, generated {1}\n{2}'.format(input, len(outputfiles), list(outputfiles))
+        return (True, outputfiles, log)
+
+        
+
+    
+def MergeTiles(input, output, filetype):    
+    log = ''
+
+    if isinstance(input, str):
+        input = [input]
+    print(list(input))
 
     try:
-        subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+files+['-o{0}'.format(filetype),'-o',file,'-merged'] 
+        subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+input+['-o{0}'.format(filetype),'-o',output,'-merged'] 
         subprocessargs=map(str,subprocessargs)    
-        subprocess.call(subprocessargs) 
-        if os.path.isfile(file):
-            for infile in files:
-                os.remove(infile)
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)  
 
-        result = {"file":file, "state" :"Success", "output":"Tiles Merged" }
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        return (False,None,log)
 
     except:
-        result = {"file":file, "state" :"Fail", "output":"Tiles could not be merged" }
+        log = "\n Merging {0} \n Exception {1}".format(output, e)
+        return(False,None, log)
 
+    finally:
+        if os.path.isfile(output):
+            for infile in input:
+                os.remove(infile)
+            log = '/Merging completed for {0}'.format(output)
+            return (True, output, log)
+        else:
+            log ='/Merging {} Failed'.format(output)
+            return (False, None, log)
 
-    return(result)
-   
+  
 #-----------------------------------------------------------------------------------------------------------------
 #Main entry point
 #-----------------------------------------------------------------------------------------------------------------
-def main(argv):
+def main():
     
     args = param_parser()
 
@@ -109,77 +135,53 @@ def main(argv):
     files = glob.glob(inputfolder+"\\*."+filetype)
     cores=int(args.cores)
     outlasdir=args.output_dir
-    outputfile = os.path.join(outlasdir, args.output_file)
-    logger = Atlasslogger(outlasdir)
 
-    '''
-    al = AtlassTileLayout()
-    data = al.fromjson("D:\\Python\\Gui\\output\\test.json")
-    print(data)
-    '''
 
-    TILETASK=[]
+
+    print('Tiling started')
+    TILE_TASKS={}
     for file in files:
-        TILETASK.append((TileStrip,(file,outlasdir,tilesize,filetype)))
-        
-    results=AtlassTaskRunner(cores,TILETASK,'Tiling', logger, str(args)).results
+    
+        path, filename, ext = AtlassGen.FILESPEC(file)
+        x,y=filename.split('_')  
+
+        #files
+        input = file
+        outputpath=AtlassGen.makedir(os.path.join(outlasdir,filename))
+        TILE_TASKS[filename] = AtlassTask(filename,TileStrip,input,outputpath,tilesize,filetype)
+
+    p=Pool(processes=cores)      
+    TILE_RESULTS=p.map(AtlassTaskRunner.taskmanager,TILE_TASKS.values())
     resultsdic=defaultdict(list)
-    print(results)
 
     #merge tiles with the same tile name
-    MERGETASK=[]
-    for result in results:
-        for key, value in result.items():
-            if key =='Tile':
-                print(value)
-                filepath,filename,extn=AtlassGen.FILESPEC(file)
-                resultsdic[value].append(file)
-    for key in list(resultsdic.keys()): 
-        print(key)
-        outfile=os.path.join(outlasdir,'{0}.{1}'.format(key,filetype)).replace('\\','/')
-        MERGETASK.append((MergeTiles,(outfile,resultsdic[key],filetype)))  
-    
-    results=AtlassTaskRunner(cores,MERGETASK,'Merging', logger, str(args)).results
-    
-    tilelayout = AtlassTileLayout()
+    MERGE_TASKS={}
 
+    print('Merging started')
+    for result in TILE_RESULTS:
+        print(result.name, result.log)
+        if result.success:
+            for resultfile in result.result:
+                resultsdic[result.name].append(resultfile)
+    
+    for key, value in list(resultsdic.items()): 
+        print(key, value)
+        input = resultsdic[key]
+        output = os.path.join(outlasdir, '{0}.{1}'.format(key,filetype))
+        MERGE_TASKS[key]= AtlassTask(key, MergeTiles, input, output, filetype)
+    
+    MERGE_RESULTS=p.map(AtlassTaskRunner.taskmanager,MERGE_TASKS.values())
+    
+ 
     print("Making initial geojson file from dictionary \n")
     #make a tile layout index
-    for file in results:
-        for key, value in result.items():
-            if key =='file':
-                print(value)
-                x,y=value.split('_')
-            tilelayout.addtile(name=value, xmin=float(x), ymin=float(y), xmax=float(x)+tilesize, ymax=float(y)+tilesize, task1='done', task1_val='val')
-        '''
-        #Format for dictionary input
-        tiles[filename] = {'name':filename,'xmin':float(x), 'ymin':float(y), 'xmax':float(x)+tilesize,'ymax':float(y)+tilesize, 'key1':'shsfhsfh', 'key2':'dfhdhd'}
+    for result in MERGE_RESULTS:
 
-        tilelayout.fromdict(tiles)
-        '''
+        print(result.result, result.log)
 
-    
-    outputfile = tilelayout.createGeojsonFile(outputfile)
-    print("Creating geojson file : Completed\n")
-    print("output file : {}/{}".format(os.path.dirname(os.path.realpath(__file__)), outputfile))
-    
-    #Take a tile layout and add new params
-
-    tl2 = AtlassTileLayout()
-    tl2.fromjson(outputfile)
-    for tile in tl2:
-        tile.addparams(task2= "done", task2_val= "yahooo" )
-        print('getting neighbours')
-        neighbours = tile.getneighbours(50)
-        print(len(neighbours))
-
-
-    outputfile = tl2.createGeojsonFile(outputfile)
-    print("Reading from geojson file : Completed\n")
-    print("output file : {}".format(outputfile))
 
     return
 
 if __name__ == "__main__":
-    main(sys.argv[1:])         
+    main()         
 

@@ -13,7 +13,7 @@ import json
 import objectpath
 import logging
 from time import strftime
-
+import numpy as np
 import linecache
 import scipy
 from scipy import misc
@@ -169,6 +169,8 @@ class AsciiGrid(object):
         self.cellsize=float(linecache.getline(file, 5).split()[1])
         self.nodata_value=float(linecache.getline(file, 6).split()[1])
         self.grid=np.array(np.loadtxt(file, skiprows=6),dtype=float)
+
+
     def savetofile(self,file):
         np.set_printoptions(formatter={'float': '{: 0.3f}'.format})
         with open(file, "w") as f:
