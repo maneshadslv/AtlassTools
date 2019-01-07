@@ -14,7 +14,7 @@ from collections import defaultdict
 from collections import OrderedDict 
 from gooey import Gooey, GooeyParser
 from multiprocessing import Pool,freeze_support
-sys.path.append('{0}/lib/atlass/'.format(sys.path[0]))
+sys.path.append('{0}/lib/atlass/'.format(sys.path[0]).replace('\\','/'))
 from Atlass_beta1 import *
 
 #-----------------------------------------------------------------------------------------------------------------
@@ -40,15 +40,15 @@ from Atlass_beta1 import *
 @Gooey(program_name="Tile Strip", use_legacy_titles=True, required_cols=1, default_size=(800, 500))
 def param_parser():
     parser=GooeyParser(description="Tile Strip")
-    parser.add_argument("input_folder", metavar="Files", widget="DirChooser", help="Select input las/laz files", default='D:\\Python\\Gui\\input')
+    parser.add_argument("input_folder", metavar="Files", widget="DirChooser", help="Select input las/laz files", default='')
     parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
-    parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="D:\\Python\\Gui\\output")
+    parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.laz')
+    parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="")
     parser.add_argument("cores", metavar="Number of Cores", help="Number of cores", type=int, default=4, gooey_options={
             'validator': {
                 'test': '2 <= int(user_input) <= 14',
                 'message': 'Must be between 2 and 14'
             }})
-    parser.add_argument("output_file", metavar="Output File Name", help="Provide name for outputfile", default="TileLayout.json")
     parser.add_argument("file_type",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
     args = parser.parse_args()
     return args
@@ -86,9 +86,7 @@ def TileStrip(input, outputpath, tilesize,filetype):
         log = '\nTiling completed for {0}, generated {1}\n{2}'.format(input, len(outputfiles), list(outputfiles))
         return (True, outputfiles, log)
 
-        
-
-    
+ 
 def MergeTiles(input, output, filetype):    
     log = ''
 
@@ -132,11 +130,27 @@ def main():
     inputfolder=args.input_folder
     
     files = []
-    files = glob.glob(inputfolder+"\\*."+filetype)
+    filepattern = args.filepattern.split(';')
+
+    if len(filepattern) >=2:
+        print('Number of patterns found : {0}'.format(len(filepattern)))
+    for pattern in filepattern:
+        pattern = pattern.strip()
+        print ('Selecting files with pattern {0}'.format(pattern))
+        filelist = glob.glob(inputfolder+"\\"+pattern)
+        for file in filelist:
+            files.append(file)
+    print('Number of Files founds : {0} '.format(len(files)))
+
     cores=int(args.cores)
     outlasdir=args.output_dir
 
 
+    logpath = os.path.join(outlasdir,'log_TileStrip.txt').replace('\\','/')
+    log = open(logpath, 'w')
+
+    dt = strftime("%y%m%d_%H%M")
+    workingdir = AtlassGen.makedir(os.path.join(outlasdir, '{0}_makeTileStrip'.format(dt))).replace('\\','/')
 
     print('Tiling started')
     TILE_TASKS={}
@@ -147,7 +161,7 @@ def main():
 
         #files
         input = file
-        outputpath=AtlassGen.makedir(os.path.join(outlasdir,filename))
+        outputpath=AtlassGen.makedir(os.path.join(workingdir,filename))
         TILE_TASKS[filename] = AtlassTask(filename,TileStrip,input,outputpath,tilesize,filetype)
 
     p=Pool(processes=cores)      
@@ -159,25 +173,23 @@ def main():
 
     print('Merging started')
     for result in TILE_RESULTS:
-        print(result.name, result.log)
+        log.write(result.log)  
         if result.success:
-            for resultfile in result.result:
-                resultsdic[result.name].append(resultfile)
-    
+            for file in result.result:
+                path,filename,ext = AtlassGen.FILESPEC(file)
+                resultsdic[filename].append(file)
+
+
     for key, value in list(resultsdic.items()): 
-        print(key, value)
         input = resultsdic[key]
-        output = os.path.join(outlasdir, '{0}.{1}'.format(key,filetype))
+        output = os.path.join(workingdir, '{0}.{1}'.format(key,filetype))
         MERGE_TASKS[key]= AtlassTask(key, MergeTiles, input, output, filetype)
     
     MERGE_RESULTS=p.map(AtlassTaskRunner.taskmanager,MERGE_TASKS.values())
-    
- 
-    print("Making initial geojson file from dictionary \n")
+   
     #make a tile layout index
     for result in MERGE_RESULTS:
-
-        print(result.result, result.log)
+        log.write(result.log)  
 
 
     return

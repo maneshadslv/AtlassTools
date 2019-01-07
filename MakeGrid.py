@@ -12,7 +12,7 @@ import os, glob
 import numpy as np
 from gooey import Gooey, GooeyParser
 from multiprocessing import Pool,freeze_support
-sys.path.append('{0}/lib/atlass/'.format(sys.path[0]))
+sys.path.append('{0}/lib/atlass/'.format(sys.path[0]).replace('\\','/'))
 from Atlass_beta1 import *
 
 
@@ -44,12 +44,12 @@ __keepfiles=None #can be overritten by settings
 @Gooey(program_name="Make Grid", advanced=True, default_size=(1000,800), use_legacy_titles=True, required_cols=1, optional_cols=3)
 def param_parser():
     main_parser=GooeyParser(description="Make Grid")
-    main_parser.add_argument("inputpath", metavar="LAS files", widget="DirChooser", help="Select input las/laz file", default='D:\\Python\\test')
-    main_parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
-    main_parser.add_argument("geojsonfile", metavar="TileLayout file", widget="FileChooser", help="Select .json file", default='D:\\Python\\test\\TileLayout.json')
-    main_parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='D:\\Python\\test\\out')
+    main_parser.add_argument("inputpath", metavar="LAS files", widget="DirChooser", help="Select input las/laz file", default='')
+    main_parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.laz')
+    main_parser.add_argument("geojsonfile", metavar="TileLayout file", widget="FileChooser", help="Select .json file", default='')
+    main_parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
     main_parser.add_argument("-tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
-    main_parser.add_argument("aoifile", metavar="AOI shp file", widget="FileChooser", help="Select aoi shape file for clipping", default='D:\\Python\\test\\aoi.shp')
+    main_parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
     product_group = main_parser.add_argument_group("Products", "Select Output Products", gooey_options={'show_border': True,'columns': 5})
     product_group.add_argument("-dem", "--makeDEM", metavar="DEM", action='store_true', default=True)
     product_group.add_argument("-dsm", "--makeDSM", metavar="DSM", action='store_true')
@@ -59,6 +59,7 @@ def param_parser():
     main_parser.add_argument("-cs", "--chmstep",metavar="CHM step", help="Provide chmstep", type=float, default=2.0)
     main_parser.add_argument("-b", "--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
     main_parser.add_argument("--clipshape", metavar="Clip shape", help="Clip Shape", action='store_true')
+    main_parser.add_argument("--aoifile", metavar="AOI shp file", widget="FileChooser", help="Select aoi shape file for clipping", default='')
     main_parser.add_argument("-c", "--classes",metavar="classes", help="Provide classes", default="2;8")
     main_parser.add_argument("-ngc", "--nongndclasses", metavar = "Non Ground Classes", default="1 3 4 5 6 10 13 14 15")
     main_parser.add_argument("-chmc", "--chmclasses", metavar = "CHM Classes", default="3 4 5")
@@ -461,6 +462,7 @@ def main(argv):
     args = param_parser()
 
     #create variables from gui
+    inputfolder = args.inputpath
     outputpath=args.outputpath
     outputpath=outputpath.replace('\\','/')
     buffer=float(args.buffer)
@@ -486,7 +488,18 @@ def main(argv):
     aoifile = args.aoifile
     tilelayout = AtlassTileLayout()
     lasfiles = []
-    lasfiles = glob.glob(args.inputpath+"\\*."+filetype)
+    filepattern = args.filepattern.split(';')
+
+    if len(filepattern) >=2:
+        print('Number of patterns found : {0}'.format(len(filepattern)))
+    for pattern in filepattern:
+        pattern = pattern.strip()
+        print ('Selecting files with pattern {0}'.format(pattern))
+        filelist = glob.glob(inputfolder+"\\"+pattern)
+        for file in filelist:
+            lasfiles.append(file)
+    print('Number of Files founds : {0} '.format(len(lasfiles)))
+
 
     logpath = os.path.join(outputpath,'log.txt').replace('\\','/')
 
@@ -639,7 +652,7 @@ def main(argv):
                 if result.success:
                     tilename = result.name
                     x,y=tilename.split('_') 
-
+                    file = os.path.join(proddir,'{0}_{1}.{2}'.format(tilename, product, filetype)).replace('\\','/')
                     index_tasks[tilename] = AtlassTask(tilename, index, file)
             
         

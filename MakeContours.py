@@ -10,7 +10,7 @@ from time import strftime
 from shutil import copyfile
 import glob
 from multiprocessing import Pool,freeze_support
-sys.path.append('{0}/lib/atlass/'.format(sys.path[0]))
+sys.path.append('{0}/lib/atlass/'.format(sys.path[0]).replace('\\','/'))
 from Atlass_beta1 import *
 #-----------------------------------------------------------------------------------------------------------------
 #Gooey input
@@ -20,7 +20,7 @@ from Atlass_beta1 import *
 def param_parser():
     parser=GooeyParser(description="Make Contour")
     parser.add_argument("inputfolder", metavar="Contour Points Folder", widget="DirChooser", help="Select input files (.las/.laz)", default='')
-    parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
+    parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.laz')
     parser.add_argument("layoutfile", metavar="TileLayout file", widget="FileChooser", help="TileLayout file(.json)", default='')
     #parser.add_argument("hydrofiles", metavar="Hydro LAS files", widget="MultiFileChooser", help="Select Hydro files (las/laz )", default='')
     parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
@@ -77,7 +77,7 @@ def makegmsfiles(filename,inpath,outpath,buffoutpath,clipoutpath,xmin,ymin,zone,
             while '<ymax>' in data:
                 data = data.replace('<ymax>', str(ymin+tilesize))
             while '<index>' in data:
-                data = data.replace('<index>', index)
+                data = data.replace('<index>', str(index))
 
         with open(dstfile, 'w') as f:
                 f.write(data)
@@ -157,8 +157,20 @@ def main():
     #Set Arguments
     args = param_parser()
 
+    inputfolder=args.inputfolder
+    filepattern = args.filepattern.split(';')
+
     contourfiles = []
-    contourfiles = glob.glob(args.inputfolder+"\\*."+args.filetype)
+    if len(filepattern) >=2:
+        print('Number of patterns found : {0}'.format(len(filepattern)))
+    for pattern in filepattern:
+        pattern = pattern.strip()
+        print ('Selecting files with pattern {0}'.format(pattern))
+        filelist = glob.glob(inputfolder+"\\"+pattern)
+        for file in filelist:
+            contourfiles.append(file)
+    print('Number of Files founds : {0} '.format(len(contourfiles)))
+
     tilelayoutfile = args.layoutfile
     outpath = args.outputpath
     #hydrofiles = args.hydrofiles
@@ -182,7 +194,7 @@ def main():
 
     dt = strftime("%y%m%d_%H%M")
 
-    contour_buffered_out_path = AtlassGen.makedir(os.path.join(outpath, (dt+'_contour_buffered')))
+    contour_buffered_out_path = AtlassGen.makedir(os.path.join(outpath, (dt+'_makeContour')))
     gms_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'scripts'))
     bufferedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, ('buffered_{0}m_contours'.format(buffer))))
     clippedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, ('clipped'.format(buffer))))
@@ -210,24 +222,27 @@ def main():
     mk_gmsfiles_tasks = {}
     for result in mk_contour_results:
         print(result.success, result.log)
-        path, filename, ext = AtlassGen.FILESPEC(result.result)
-        x,y=filename.split('_')
+        if result.success:
+            path, filename, ext = AtlassGen.FILESPEC(result.result)
+            x,y=filename.split('_')
 
-        mk_gmsfiles_tasks[filename] = AtlassTask(filename, makegmsfiles,filename,contour_buffered_out_path,gms_path,bufferedout_path,clippedout_path,int(x),int(y), zone, aoi, index, int(tilesize))
-    
-    
+            mk_gmsfiles_tasks[filename] = AtlassTask(filename, makegmsfiles,filename,contour_buffered_out_path,gms_path,bufferedout_path,clippedout_path,int(x),int(y), zone, aoi, index, int(tilesize))
+        
+        
     mk_gmsfiles_results=p.map(AtlassTaskRunner.taskmanager,mk_gmsfiles_tasks.values())
 
 
     #Run GMS files
     run_gmsfiles_tasks = {}
     for result in mk_gmsfiles_results:
-        print(result.result, result.log)
-        path, filename, ext = AtlassGen.FILESPEC(result.result)
-        #files
-        gmscript = os.path.join(gms_path,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
+        print(result.success, result.log)
+        if result.success:
+                
+            path, filename, ext = AtlassGen.FILESPEC(result.result)
+            #files
+            gmscript = os.path.join(gms_path,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
 
-        run_gmsfiles_tasks[filename] = AtlassTask(filename, rungmsfiles, gmexe, gmscript)
+            run_gmsfiles_tasks[filename] = AtlassTask(filename, rungmsfiles, gmexe, gmscript)
 
     run_gmsfiles_results=p.map(AtlassTaskRunner.taskmanager,run_gmsfiles_tasks.values())
 

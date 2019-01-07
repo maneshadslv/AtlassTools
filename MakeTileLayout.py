@@ -14,9 +14,9 @@ import glob
 from collections import defaultdict 
 from collections import OrderedDict 
 from gooey import Gooey, GooeyParser
-sys.path.append('{0}/lib/shapefile/'.format(sys.path[0]))
+sys.path.append('{0}/lib/shapefile/'.format(sys.path[0]).replace('\\','/'))
 import shapefile
-sys.path.append('{0}/lib/atlass/'.format(sys.path[0]))
+sys.path.append('{0}/lib/atlass/'.format(sys.path[0]).replace('\\','/'))
 from Atlass_beta1 import *
 
 #-----------------------------------------------------------------------------------------------------------------
@@ -39,10 +39,12 @@ from Atlass_beta1 import *
 #-----------------------------------------------------------------------------------------------------------------
 # Function used to calculate result
 
-@Gooey(program_name="Make TileLayout", use_legacy_titles=True, required_cols=1, default_size=(800,600))
+@Gooey(program_name="Make TileLayout", use_legacy_titles=True, required_cols=1, default_size=(810,670))
 def param_parser():
     parser=GooeyParser(description="Make Tile Layout")
     parser.add_argument("input_folder", metavar="Input Folder", widget="DirChooser", help="Select folder with las/laz files")
+    parser.add_argument("filepattern",metavar="Input filter Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.laz')
+    parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
     parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
     parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="")
     parser.add_argument("cores", metavar="Number of Cores", help="Number of cores", type=int, default=4, gooey_options={
@@ -52,7 +54,6 @@ def param_parser():
             }})
     parser.add_argument("jsonfile", metavar="Output File Name", help="Provide name for outputfile (.json)", default="TileLayout.json")
     parser.add_argument("prjfile", metavar="Output Prj file name",help="Provide name for prj file (.prj)", default="tile_layout.prj")
-    parser.add_argument("file_type",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='las')
     product_group = parser.add_argument_group("Other outputs", "Select Other outputs", gooey_options={'show_border': True,'columns': 5})
     product_group.add_argument("-shp", "--makeshp", metavar="shp", action='store_true', default=False)
     product_group.add_argument("-prj", "--makeprj", metavar="prj", action='store_true', default=False)
@@ -73,16 +74,20 @@ def main():
     args = param_parser()
 
     tilesize=int(args.tile_size)
-    filetype=args.file_type
     inputfolder=args.input_folder
+    filetype = args.filetype
     
-    files = []
-    files = glob.glob(inputfolder+"\\*."+filetype)
+  
+    filepattern = args.filepattern.split(';')
+
+
+    files = AtlassGen.FILELIST(filepattern, inputfolder)
+
     cores=int(args.cores)
     outlasdir=args.output_dir
     jsonfile = os.path.join(outlasdir, args.jsonfile).replace("\\", "/")
     prjfile = os.path.join(outlasdir, args.prjfile).replace("\\", "/")
-    logger = Atlasslogger(outlasdir)
+
     makeshp = args.makeshp
     makeprj = args.makeprj
 
@@ -100,7 +105,7 @@ def main():
     w.field('YMIN','N',12,3)
     w.field('XMAX','N',12,3)
     w.field('YMAX','N',12,3)
-    w.field('TILENUM','C','8')
+    w.field('TILENUM','C','16')
 
 
     print("Making geojson file : Started \n")
@@ -121,10 +126,9 @@ def main():
 
             
             #write the header to the file.
-            filespec=AtlassGen.FILESPEC(files[0])
             f.write('[TerraScan project]\n')
             f.write('Scanner=Airborne\n')
-            f.write('Storage={0}1.2\n'.format(filespec[2]))
+            f.write('Storage={0}1.2\n'.format(filetype))
             f.write('StoreTime=2\n')
             f.write('StoreColor=0\n')
             f.write('RequireLock=0\n')
@@ -153,13 +157,13 @@ def main():
         
     if makeshp:
         print("Making shp file : Started\n")
-        filespec=AtlassGen.FILESPEC(files[0])
+
         for file in files:
             filepath,filename,extn=AtlassGen.FILESPEC(file)
             x,y=filename.split('_')
             boxcoords=AtlassGen.GETCOORDS([x,y],tilesize)
             w.line(parts=[[boxcoords[0],boxcoords[1],boxcoords[2],boxcoords[3],boxcoords[4]]])
-            w.record(TILE_NAME='{0}'.format(filespec[1]), XMIN='{0}'.format(boxcoords[0][0]),YMIN='{0}'.format(boxcoords[0][1]),XMAX='{0}'.format(boxcoords[2][0]),YMAX='{0}'.format(boxcoords[2][1]),TILENUM='t{0}{1}'.format(int(boxcoords[0][0]/1000),int(boxcoords[0][1]/1000)))
+            w.record(TILE_NAME='{0}'.format(filename), XMIN='{0}'.format(boxcoords[0][0]),YMIN='{0}'.format(boxcoords[0][1]),XMAX='{0}'.format(boxcoords[2][0]),YMAX='{0}'.format(boxcoords[2][1]),TILENUM='t{0}{1}'.format(int(boxcoords[0][0]/1000),int(boxcoords[0][1]/1000)))
         
         w.save(prjfile.replace('.prj','_shapefile'))           
         print("Making shp file : Completed\n")

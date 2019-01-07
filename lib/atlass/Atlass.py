@@ -613,6 +613,24 @@ class AtlassGen():
         path,name=os.path.split(filename)
         name,ext=name.split(".")
     
-        return path, name, ext    
+        return path, name, ext
+
+    def GETCOORDS(coords,size):
+        #recieves tile name without extn or path
+        #use FILESPEC to split file name
+        #x and y coords must be the the first 2 portions of the file name an must be able to be separated by _
+        boxcoords=[]
+        coordsf=[]
+        for coord in coords:
+            coordsf.append(float(coord))
+            
+        boxcoords.append([coordsf[0],coordsf[1]])
+        boxcoords.append([coordsf[0],coordsf[1]+size])
+        boxcoords.append([coordsf[0]+size,coordsf[1]+size])
+        boxcoords.append([coordsf[0]+size,coordsf[1]])
+        boxcoords.append([coordsf[0],coordsf[1]])
+        
+        return boxcoords
+        
 
 

@@ -12,9 +12,10 @@ import time
 import datetime
 from time import strftime
 from multiprocessing import Pool,freeze_support
-sys.path.append('{0}/lib/atlass/'.format(sys.path[0]))
+sys.path.append('{0}/lib/atlass/'.format(sys.path[0]).replace('\\','/'))
 from Atlass_beta1 import *
-
+sys.path.append('{0}/lib/shapefile/'.format(sys.path[0]).replace('\\','/'))
+import shapefile
 
 #-----------------------------------------------------------------------------------------------------------------
 #Gooey input
@@ -23,18 +24,19 @@ from Atlass_beta1 import *
 @Gooey(program_name="Make TMR products", advanced=True, default_size=(1000,800), use_legacy_titles=True, required_cols=1, optional_cols=3)
 def param_parser():
     main_parser=GooeyParser(description="Make TMR products")
-    main_parser.add_argument("inputpath", metavar="Input Folder", widget="DirChooser", help="Select input las/laz folder", default="D:\\Python\\Gui\\input")
-    main_parser.add_argument("outputpath", metavar="Output Folder", widget="DirChooser", help="Select output folder", default="D:\\Python\\Gui\\input")
-    main_parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
-    main_parser.add_argument("geojsonfile", metavar="GoeJson file", widget="FileChooser", help="Select geojson file", default='D:\\Python\\Gui\\input\\TileLayout.json')
-    main_parser.add_argument("poly", metavar="AOI file", widget="FileChooser", help="polygon shapefile (.shp)", default='D:\\Python\\Gui\\input\\aoi.shp')
-    main_parser.add_argument('name', metavar="AreaName", help="Project Area Name eg : MR101502 ", default="MR22353")
-    main_parser.add_argument("epsg", metavar="EPSG", type=int, default=28356)
-    main_parser.add_argument("dx", metavar="dx", type=float, default=0.001)
-    main_parser.add_argument("dy", metavar="dy", type=float, default=0.0100)
-    main_parser.add_argument("dz", metavar="dz", type=float, default=-0.0353)
+    main_parser.add_argument("inputfolder", metavar="Input Folder", widget="DirChooser", help="Select input las/laz folder", default="")
+    main_parser.add_argument("outputpath", metavar="Output Folder", widget="DirChooser", help="Select output folder", default="")
+    main_parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns \nex: (*.laz) or (123*_456*.laz; 345*_789*.laz )", default='*.laz')
+    main_parser.add_argument("geojsonfile", metavar="TileLayout file", widget="FileChooser", help="Select TileLayout file (.json)", default='')
+    main_parser.add_argument("poly", metavar="AOI file", widget="FileChooser", help="polygon shapefile (.shp)", default='')
+    main_parser.add_argument('name', metavar="AreaName", help="Project Area Name eg : MR101502 ", default="")
+    main_parser.add_argument("epsg", metavar="EPSG", type=int)
+    main_parser.add_argument("dx", metavar="dx", type=float)
+    main_parser.add_argument("dy", metavar="dy", type=float)
+    main_parser.add_argument("dz", metavar="dz", type=float)
     main_parser.add_argument("intensity_min", metavar="Intensity min", type=float, default=100)
     main_parser.add_argument("intensity_max", metavar="Intensity max", type=float, default=2500)    
+    main_parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
     main_parser.add_argument("-tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
     main_parser.add_argument("-s", "--step", metavar="Step", help="Provide step", type=float, default = 1.0)
     main_parser.add_argument("-b", "--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
@@ -48,6 +50,255 @@ def param_parser():
 #-----------------------------------------------------------------------------------------------------------------
 #Function definitions
 #-----------------------------------------------------------------------------------------------------------------
+class TMR_AtlassTile():
+    def __init__(self,parent,**kwargs):
+        self.parent=parent
+        self._params=OrderedDict()
+        self._params['TILE_NAME']=''
+        self._params['XMIN']=None
+        self._params['YMIN']=None
+        self._params['XMAX']=None
+        self._params['YMAX']=None     
+        self._params['TILENUM']=''   
+        self.addparams(**kwargs)
+
+    def getneighbours(self,buffer):
+        neighbours=[]
+        if isinstance(buffer, float) or isinstance(buffer, int):
+            XMIN=self.XMIN-buffer
+            XMAX=self.XMAX+buffer
+            YMIN=self.YMIN-buffer
+            YMAX=self.YMAX+buffer
+            
+            for key,tile in self.parent.tiles.items():
+                if tile.XMIN<XMIN<tile.XMAX or tile.XMIN<XMAX<tile.XMAX or XMIN<tile.XMIN<XMAX or XMIN<tile.XMAX<XMAX:
+                    if tile.YMIN<YMIN<tile.YMAX or tile.YMIN<YMAX<tile.YMAX or YMIN<tile.YMIN<YMAX or YMIN<tile.YMAX<YMAX:
+                        neighbours.append(tile.TILENUM)
+        else:
+            raise TypeError('only accepts floats or integers for buffer')  
+
+
+        return neighbours
+    
+    @property
+    def TILE_NAME(self):
+        return self._params['TILE_NAME']
+
+    @TILE_NAME.setter    
+    def TILE_NAME(self, value): 
+        if isinstance(value, str):
+            self._params['TILE_NAME']=str(value)
+        else:
+            raise TypeError('only accepts strings') 
+    
+    @property
+    def TILENUM(self):
+        return self._params['TILENUM']
+
+    @TILENUM.setter    
+    def TILENUM(self, value): 
+        if isinstance(value, str):
+            self._params['TILENUM']=str(value)
+        else:
+            raise TypeError('only accepts strings') 
+
+    @property
+    def XMIN(self):
+        return self._params['XMIN']
+
+    @XMIN.setter    
+    def XMIN(self, value): 
+        if isinstance(value, float) or isinstance(value, int):
+            self._params['XMIN']=float(value)
+        else:
+            raise TypeError('only accepts floats or integers') 
+    @property
+    def YMIN(self):
+        return self._params['YMIN']
+
+    @YMIN.setter    
+    def YMIN(self, value): 
+        if isinstance(value, float) or isinstance(value, int):
+            self._params['YMIN']=float(value)
+        else:
+            raise TypeError('only accepts floats or integers')    
+
+
+    @property
+    def XMAX(self):
+        return self._params['XMAX']
+
+    @XMAX.setter    
+    def XMAX(self, value): 
+        if isinstance(value, float) or isinstance(value, int):
+            self._params['XMAX']=float(value)
+        else:
+            raise TypeError('only accepts floats or integers') 
+
+
+    @property
+    def YMAX(self):
+        return self._params['YMAX']
+
+    @YMAX.setter    
+    def YMAX(self, value): 
+        if isinstance(value, float) or isinstance(value, int):
+            self._params['YMAX']=float(value)
+        else:
+            raise TypeError('only accepts floats or integers') 
+
+    @property
+    def params(self):
+        return self._params
+
+    @params.setter  
+    def params(self,data):
+        #data can be of type dictionary
+        print("in param setter")
+        if isinstance(data,dict) or isinstance(data,OrderedDict): 
+            for stdkey in ['TILE_NAME','XMIN','YMIN','XMAX','YMAX', 'TILENUM']:
+                if not stdkey in data.keys():
+                    print('Warning: {0} not in keys'.format(stdkey))
+                    print('Current value of {0}'.format(stdkey,self._params[stdkey])) 
+
+            for key,value in data.items():
+                if key =='TILE_NAME':
+                    self.TILE_NAME=value
+                if key =='XMIN':
+                    self.XMIN=value
+                if key =='YMIN':
+                    self.YMIN=value
+                if key =='XMAX':
+                    self.XMAX=value
+                if key =='YMAX':
+                    self.YMAX=value   
+                if key =='TILENUM':
+                    self.TILENUM=value             
+                else:
+                    if isinstance(value,str) or isinstance(value,float) or isinstance(value,int):
+                        self._params[key]=value
+                    else:
+                        raise TypeError('only accepts strings, float and integers "{0}" is type: {1}'.format(key,type(value))) 
+
+                
+        else:
+            raise TypeError('only accepts dictionary type, data is of type: {0}'.format(type(value))) 
+
+  
+    def addparams(self,**kwargs):
+        for key,value in kwargs.items():
+            if key =='TILE_NAME':
+                self.TILE_NAME=value
+            if key =='XMIN':
+                self.XMIN=value
+            if key =='YMIN':
+                self.YMIN=value
+            if key =='XMAX':
+                self.XMAX=value
+            if key =='YMAX':
+                self.YMAX=value   
+            if key =='TILENUM':
+                self.TILENUM=value             
+            else:
+                if isinstance(value,str) or isinstance(value,float) or isinstance(value,int):
+                    self._params[key]=value
+                else:
+                    raise TypeError('only accepts strings, float and integers "{0}" is type: {1}'.format(key,type(value)))
+
+    def __repr__(self):
+        return str(self._params)
+
+    def __str__(self):
+        txt='{"type": "Feature",'
+        txt=txt+ '"properties": {'
+        for key,value in self.params.items():
+            if isinstance(value,int) or isinstance(value,float):
+                txt=txt+'"{0}":{1},'.format(key,value)
+            else:
+                txt=txt+'"{0}":"{1}",'.format(key,value)
+
+        txt=txt[:-1]+'},'+'"geometry":{"type": "Polygon","coordinates":'+'[[[{0},{1}],[{2},{1}],[{2},{3}],[{0},{3}],[{0},{1}]]]'.format(self.XMIN,self.YMIN,self.XMAX,self.YMAX)+'}}'
+
+        return txt
+
+class TMR_AtlassTileLayout():
+    fileNo = 0
+    def __init__(self):
+        self.tiles=OrderedDict()
+        pass
+
+    def __iter__(self):
+        for key,item in self.tiles.items():
+            yield item
+
+    def addtile(self,**kwargs):
+        
+        for stdkey in ['TILE_NAME','XMIN','YMIN','XMAX','YMAX', 'TILENUM']:
+            if not stdkey in kwargs.keys():
+                print('Warning: {0} not in keys. Tile not added'.format(stdkey))
+                return
+        self.tiles[kwargs['TILENUM']]=TMR_AtlassTile(self,**kwargs)
+
+    def gettile(self,tilename):
+        print(tilename)
+        if isinstance(tilename,str):
+            if tilename in self.tiles.keys():
+                #return tile object
+                return self.tiles[tilename]
+        else:
+            raise TypeError('only accepts strings as tilename')  
+      
+
+    def fromdict(self,data):    
+       for key, value in data.items():
+            if not key in self.tiles:
+                self.tiles[key]=TMR_AtlassTile(self, **value)
+            else:
+                pass
+
+
+    def fromjson(self, jsonfile):
+        with open(jsonfile) as fr:
+            data = json.load(fr)
+            tiles = {}
+            for value in data['features']:
+                 #print(value)
+                 tile = {}
+                 for key, val in value['properties'].items():
+                     if(key == 'TILENUM'):
+                         key = 'TILENUM'
+                     tile[key] = val
+
+                 name = tile['TILENUM']           
+                 tiles[name] = tile
+
+            self.fromdict(tiles)
+        return 
+
+
+    def createGeojsonFile(self, outputfile):
+
+        with open(outputfile, 'w') as f:
+             f.write('')
+        
+        with open(outputfile, 'a') as f:
+            tilestr = '{ "type": "FeatureCollection", "features": ['
+            for key, value in self.tiles.items():
+                 tilestr = tilestr + str(value)+','
+            tilestr = tilestr[:-1]+']}'
+            f.write(tilestr)
+
+        return outputfile
+                
+    def __repr__(self):
+        return 'tilelayout()'
+
+    def __str__(self):
+        return 'tilelayout with tiles:({0})'.format(self.len())    
+
+    def __len__(self):
+        return len(self.tiles.keys())
+
 def asciigridtolas(input, output , filetype):
     '''
     Converts an ascii file to a las/laz file and retains the milimetre precision.
@@ -151,11 +402,20 @@ def makeDEM(xmin, ymin, xmax, ymax, gndfile, workdir, dtmfile, buffer, kill, ste
 
     
     try:
+
+        #not changing the classifciation, just creating a buffered unfiltered temp file.
+        gndfile2 = gndfile
+        gndfile=os.path.join(workdir,'{0}_{1}_dem_gnd.{2}'.format(xmin, ymin,filetype)).replace('\\','/')
+        subprocessargs=['C:/LAStools/bin/las2las.exe','-i',gndfile2,'-merged','-o{0}'.format(filetype),'-o',gndfile, '-keep_class'] + gndclasses
+        subprocessargs=list(map(str,subprocessargs)) 
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+    
+
         #make dem -- simple tin to DEM process made with buffer and clipped  back to the tile boundary
         print("Checking for Hydro files")
         if not hydropoints==None:
             gndfile2 = gndfile
-            gndfile=os.path.join(workdir,'{0}_{}_dem_hydro.{1}'.format(xmin, ymin,filetype)).replace('\\','/')
+            gndfile=os.path.join(workdir,'{0}_{1}_dem_hydro.{2}'.format(xmin, ymin,filetype)).replace('\\','/')
             subprocessargs=['C:/LAStools/bin/las2las.exe','-i', gndfile2,'-merged','-o{0}'.format(filetype),'-o',gndfile] + keep 
             subprocessargs=list(map(str,subprocessargs))
             p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
@@ -269,21 +529,24 @@ def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, bu
         input = [input]
 
     try:
-        subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+input+['-merged','-o{0}'.format(filetype),'-o',tempfile,'-keep_class'] + gndclasses
+
+
+        #not changing the classifciation, just creating a buffered unfiltered temp file.
+        subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+input+['-merged','-o{0}'.format(filetype),'-o',tempfile]
         subprocessargs=subprocessargs+['-keep_xy',tile.xmin-buffer,tile.ymin-buffer,tile.xmax+buffer,tile.ymax+buffer]
         subprocessargs=list(map(str,subprocessargs)) 
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
     
-
-        subprocessargs=['C:/LAStools/bin/lasthin.exe','-i',tempfile,'-o{0}'.format(filetype),'-o',tempfile2,'-adaptive',vt,hz,'-set_classification',8]
+        subprocessargs=['C:/LAStools/bin/lasthin.exe','-i',tempfile,'-o{0}'.format(filetype),'-o',tempfile2,'-adaptive',vt,hz,'-classify_as',8,'-ignore_class'] + [0,1,3,4,5,6,7,9,10,11,12,13,14,15,16,17,18,19,20]
         subprocessargs=list(map(str,subprocessargs))    
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
 
+       
         subprocessargs=['C:/LAStools/bin/las2las.exe','-i',tempfile2,'-o{0}'.format(filetype),'-o',output]
         subprocessargs=subprocessargs+['-keep_xy',tile.xmin,tile.ymin,tile.xmax,tile.ymax]
         subprocessargs=list(map(str,subprocessargs))    
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
-
+        
     except subprocess.CalledProcessError as suberror:
         log=log +'\n'+ "{0}\n".format(suberror.stdout)
         print(log)
@@ -300,6 +563,7 @@ def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, bu
                 if os.path.isfile(file):
                     os.remove(file)
                     pass
+            #file contains all original points. Original Ground class (2) has been split into ground (2) and MKP (8)
             return (True,output, log)
 
         else: 
@@ -373,7 +637,7 @@ def main():
     args = param_parser()
     filetype=args.filetype
 
-
+    inputfolder = args.inputfolder
     areaname = args.name
 
     buffer=float(args.buffer)
@@ -410,9 +674,8 @@ def main():
     log = open(logpath, 'w')
 
     adjdir = AtlassGen.makedir(os.path.join(outputpath, 'Adjusted')).replace('\\','/')
-    adjclippeddir = AtlassGen.makedir(os.path.join(adjdir, 'Clipped')).replace('\\','/')
-    workingdir = AtlassGen.makedir(os.path.join(adjdir, 'Working')).replace('\\','/')
-    mkpdir = AtlassGen.makedir(os.path.join(adjdir, 'MKP')).replace('\\','/')
+    workingdir = AtlassGen.makedir(os.path.join(adjdir, 'Buffered')).replace('\\','/')
+    mkpdir = AtlassGen.makedir(os.path.join(adjdir, 'MKP_working')).replace('\\','/')
     adjdemworkingdir = AtlassGen.makedir(os.path.join(adjdir, 'DEM_working')).replace('\\','/')
     prodsdir = AtlassGen.makedir(os.path.join(outputpath, 'Products')).replace('\\','/')
 
@@ -427,10 +690,12 @@ def main():
  
 
     print("Reading {0} files \n".format(filetype))
-    files = []
-    files = glob.glob(args.inputpath+"\\*."+filetype)
-    print("{0} files found \n".format(len(files)))
-    nofiles = len(files)
+    
+    filepattern = args.filepattern.split(';')
+    files = AtlassGen.FILELIST(filepattern, inputfolder)
+  
+
+
     ###########################################################################################################################
     #Adjust las
     adj_tasks = {}
@@ -454,58 +719,17 @@ def main():
     adjust_results=p.map(AtlassTaskRunner.taskmanager,adj_tasks.values())
 
     ###########################################################################################################################
-    #las index
-
-    print("Indexing the adjusted Files")
-    index_tasks = {}
-    for result in adjust_results:
-        log.write(result.log)
-        if result.success:
-            file = result.result
-            path, filename, ext = AtlassGen.FILESPEC(file)
-            x,y=filename.split('_') 
-
-            index_tasks[filename] = AtlassTask(filename, index, file)
-    
-
-    index_results=p.map(AtlassTaskRunner.taskmanager,index_tasks.values())
-
-    ###########################################################################################################################
-    '''
-    clip adjusted las into polygon
-    lets say there are 1000 files in the input folder.
-    The polygon only covers 100 of these. 
-    We only need to make DEM and MKP for the 100.
-    If we use the names of the 100 returned clipped las files to guide the task runner for these processes.
-    We can save considerable tprocessinf time.
-    '''
-    print('Clipping adjusted files to the AOI')
-    clip_task = {}
-
-    for result in adjust_results:
- 
-        if result.success:
-            file = result.result
-            path, filename, ext = AtlassGen.FILESPEC(file)
-            x,y = filename.split('_')
-            #files
-            output = os.path.join(adjclippeddir, '{0}.{1}'.format(filename, filetype)).replace("\\", "/")
-            input = os.path.join(adjdir, '{0}.{1}'.format(filename, filetype)).replace("\\", "/")
-
-            clip_task[filename] = AtlassTask(filename, clip, input, output, poly, filetype)
-            #clip(input,output,poly,filetype)
-            
-
-
-    clip_results=p.map(AtlassTaskRunner.taskmanager,clip_task.values())
-
-    ###########################################################################################################################
     #MKP process
     #use names from clipped las to decide which tiles to generate mkp from unclipped adjusted las.
 
+    '''
+    Revision: remove the check against clipped file list. Clipping will be done after this step.
+
+    '''
+
     print('\n\n Starting MKP')
     mkp_tasks = {}
-    for result in clip_results:
+    for result in adjust_results:
         #tasklist={'ProcessName':'Run some tasks','fn'=func,'Tasks':{'tile/filename':{'args':args,'kwargs':kwargs,'status':False,'output':None,'log':'blah blah blah\n blah blah blah'}}}
         log.write(result.log)  
         if result.success:
@@ -553,6 +777,7 @@ def main():
             x,y=filename.split('_') 
 
             mkp_index_tasks[filename] = AtlassTask(filename, index, file)
+            
     
    
     mkp_index_results=p.map(AtlassTaskRunner.taskmanager,mkp_index_tasks.values())
@@ -569,16 +794,14 @@ def main():
     for result in mkp_index_results:
         log.write(result.log)        
         if result.success:
-            
             tilename=result.name
             x,y = tilename.split('_')
             #files 
-            input_adj = os.path.join(adjdir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')  #adjusted las
-            input_mkp = result.result # mkp
-            output = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, filetype)).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
-            input=[input_adj, input_mkp] 
+            input = os.path.join(mkpdir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/') # mkp
+            output = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, 'las')).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
+         
 
-            clip_mkp_tasks[tilename] = AtlassTask(tilename, clip, input, output, poly, filetype)
+            clip_mkp_tasks[tilename] = AtlassTask(tilename, clip, input, output, poly, 'las')
 
 
     clip_mkp_results=p.map(AtlassTaskRunner.taskmanager,clip_mkp_tasks.values())   
@@ -681,7 +904,7 @@ def main():
     print('Converting Clipped {0} to asc'.format(filetype))
     lastoasciigrid_tasks={}
     for result in  clip_demlaz_results:
-        print(result.success, result.log, result.name)
+        log.write(result.log)
         if result.success:
             tilename = result.name
 
@@ -739,7 +962,7 @@ def main():
             x,y=tilename.split('_') 
 
             #files 
-            input = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, filetype)).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
+            input = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, 'las')).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
             output = os.path.join(intensitydir,'{0}_2018_SW_{1}_{2}_1k_50cm_INT.tif'.format(areaname, x, y)).replace("\\", "/")   #<inputpath>/Products/<Area_Name>_Intensity_50cm/<Name>_2018_SW_<X>_<Y>_1k_50cm_INT.tif
 
             grid_tasks[tilename] = AtlassTask(tilename, makegrid, input, output, intensityMin,intensityMax)
@@ -749,8 +972,90 @@ def main():
     
     for result in grid_results:
         log.write(result.log)
-        print(result.name, result.success)
+    print('Making Poducts Completed')
 
+    '''
+    print('Making TileLayout for processed files')
+
+    tilelayout2 = TMR_AtlassTileLayout()
+    jsonfile = os.path.join(prodsdir, 'tilelayout.json')
+
+
+    for file in files:
+        filepath,filename,extn=AtlassGen.FILESPEC(file)
+        x,y=filename.split('_')
+        tilename = '{0}_SW_{1}_{2}_1k'.format(areaname, x, y)
+        tilelayout2.addtile(TILE_NAME=tilename, XMIN=float(x), YMIN=float(y), XMAX=float(x)+tilesize, YMAX=float(y)+tilesize, TILENUM=filename)
+         
+    jsonfile = tilelayout2.createGeojsonFile(jsonfile)
+
+    print("Making geojson file : Completed\n")
+    '''
+    prjfile = os.path.join(prodsdir, '{0}_tile_layout.prj'.format(areaname)).replace("\\", "/")
+    prjfilespec=AtlassGen.FILESPEC(prjfile)
+    if not os.path.exists(prjfilespec[0]):
+        os.makedirs(prjfilespec[0])
+    
+    w = shapefile.Writer(shapefile.POLYGON)
+    w.autoBalance = 1
+    w.field('TILE_NAME','C','255')
+    w.field('XMIN','N',12,3)
+    w.field('YMIN','N',12,3)
+    w.field('XMAX','N',12,3)
+    w.field('YMAX','N',12,3)
+    w.field('TILENUM','C','16')
+
+
+
+    print("Making prj file : Started\n")
+    with open(prjfile,"w") as f:
+
+        
+        #write the header to the file.
+        f.write('[TerraScan project]\n')
+        f.write('Scanner=Airborne\n')
+        f.write('Storage={0}1.2\n'.format(filetype))
+        f.write('StoreTime=2\n')
+        f.write('StoreColor=0\n')
+        f.write('RequireLock=0\n')
+        f.write('Description=Created using Compass\n')
+        f.write('FirstPointId=1\n')
+        f.write('Directory={0}\n'.format(inputfolder))
+        f.write('PointClasses=\n')
+        f.write('Trajectories=\n')
+        f.write('BlockSize={0}\n'.format(str(tilesize)))
+        f.write('BlockNaming=0\n')
+        f.write('BlockPrefix=\n')   
+        
+        
+        #make a prj fille
+
+        for file in files:
+            filepath,filename,extn=AtlassGen.FILESPEC(file)
+            x,y=filename.split('_')
+            boxcoords=AtlassGen.GETCOORDS([x,y],tilesize)
+            f.write( '\nBlock {0}.{1}\n'.format(filename,extn))
+            for i in boxcoords:
+                f.write(  ' {0} {1}\n'.format(i[0],i[1]))
+
+        f.close
+        print("Making prj file : Completed\n")
+        
+
+    print("Making shp file : Started\n")
+
+    for file in files:
+        filepath,filename,extn=AtlassGen.FILESPEC(file)
+        x,y=filename.split('_')
+        tilename = '{0}_SW_{1}_{2}_1k'.format(areaname, x, y)
+        boxcoords=AtlassGen.GETCOORDS([x,y],tilesize)
+        w.line(parts=[[boxcoords[0],boxcoords[1],boxcoords[2],boxcoords[3],boxcoords[4]]])
+        w.record(TILE_NAME='{0}'.format(tilename), XMIN='{0}'.format(boxcoords[0][0]),YMIN='{0}'.format(boxcoords[0][1]),XMAX='{0}'.format(boxcoords[2][0]),YMAX='{0}'.format(boxcoords[2][1]),TILENUM='{0}_{1}'.format(x,y))
+    
+    w.save(prjfile.replace('.prj','_shapefile'))           
+    print("Making shp file : Completed\n")
+
+    print('---------------------------------------------------------------------------------------------------------\nProcess Completed')
     log.close()
     return
 
