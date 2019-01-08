@@ -262,6 +262,7 @@ def main(argv):
     gcp_outof_range = total_gcp_points-len(data)
 
     print('\nNo of GCPs out of range: {0}'.format(gcp_outof_range))
+    
     #Calculate initial statistics
     dmean, tsigma = calc_stats(data)
     print('\n\ninitial sigma {0}'.format(tsigma))

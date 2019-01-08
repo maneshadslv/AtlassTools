@@ -44,19 +44,19 @@ def param_parser():
     parser.add_argument("input_folder", metavar="Input Directory", widget="DirChooser", help="Select input las/laz files", default='')
     parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="")
     parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
-    parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.las')
+    parser.add_argument("filepattern",metavar="Input File Filter Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.las')
     parser.add_argument("file_type",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='las')
     gnd_group = parser.add_argument_group("Ground Settings", gooey_options={'show_border': True,'columns': 5})
-    gnd_group.add_argument("--gndstep", metavar="Step", help="Provide the step to be used for ground classification", default=10, type=float)
-    gnd_group.add_argument("--spike", metavar="Spike", help="Provide the spike to be used for ground classification", default=0.5, type=float)
-    gnd_group.add_argument("--downspike", metavar="Down Spike", help="Provide the down spike to be used for ground classification", default=1, type=float)
-    gnd_group.add_argument("--bulge", metavar="Bulge", help="Provide the bulge to be used for round classification", default=2.5, type=float)
-    gnd_group.add_argument("--offset", metavar="Offset", help="Provide the offset to be used for ground classification", default=1.0, type=float)
+    gnd_group.add_argument("--gndstep", metavar="Step", default=10, type=float)
+    gnd_group.add_argument("--spike", metavar="Spike", default=0.5, type=float)
+    gnd_group.add_argument("--downspike", metavar="Down Spike", default=1, type=float)
+    gnd_group.add_argument("--bulge", metavar="Bulge", default=2.5, type=float)
+    gnd_group.add_argument("--offset", metavar="Offset", default=1.0, type=float)
     noise_group = parser.add_argument_group("Noise Settings", gooey_options={'show_border': True,'columns': 2})
-    noise_group.add_argument("--noisestep", metavar="Step", help="Provide the step to be used for lasnoise", default=3.0, type=float)
-    noise_group.add_argument("--isopoints", metavar="Isolated points", help="Provide the number of points to be used for lasnoise", default=10, type=int)
+    noise_group.add_argument("--noisestep", metavar="Step",default=3.0, type=float)
+    noise_group.add_argument("--isopoints", metavar="Isolated points", default=10, type=int)
     dem_group = parser.add_argument_group('DEM settings',gooey_options={'show_border': True,'columns': 3})
-    dem_group.add_argument("--demstep", metavar="Step - DEM", help="Provide the step to be used for blast2dem", default=1.0, type=float)
+    dem_group.add_argument("--demstep", metavar="Step - DEM", default=1.0, type=float)
     cores_group = parser.add_argument_group("Cores Settings", gooey_options={'show_border': True,'columns': 3} )
     cores_group.add_argument("--noisecores", metavar="Noise", help="Number of Cores to be used for noise removal process (Should be a small number)", type=int, default=4, gooey_options={
         'validator': {
@@ -109,11 +109,9 @@ def TileStrip(input, outputpath, tilesize,filetype):
     
     finally:
         outputfiles = glob.glob(outputpath+"/*."+filetype)
-        print('\nTiling completed for {0}, generated {1}\n{2}'.format(input, len(outputfiles), list(outputfiles)))
         log = '\nTiling completed for {0}, generated {1}\n{2}'.format(input, len(outputfiles), list(outputfiles))
         return (True, outputfiles, log)
 
- 
 def MergeTiles(input, output, filetype):    
     log = ''
 
@@ -205,12 +203,10 @@ def MakeDEM(x, y, tilename, gndfile, output, buffer, step,tilesize):
     log = ''
 
     try:        
-        print("DEM starting")
         subprocessargs=['C:/LAStools/bin/blast2dem.exe','-i',gndfile,'-oasc','-o', output,'-nbits',32,'-kill',200,'-step',step,'-keep_class', 2] 
         subprocessargs=subprocessargs+['-ll',x,y,'-ncols',math.ceil((tilesize)/step), '-nrows',math.ceil((tilesize)/step)]    
         #ensures the tile is not buffered by setting lower left coordinate and num rows and num cols in output grid.
         subprocessargs=list(map(str,subprocessargs))  
-        print(subprocessargs)
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
 
     except subprocess.CalledProcessError as suberror:
@@ -267,7 +263,7 @@ def main():
     log = open(logpath, 'w')
 
     dt = strftime("%y%m%d_%H%M")
-    workingdir = AtlassGen.makedir(os.path.join(outlasdir, '{0}_makeDem'.format(dt))).replace('\\','/')
+    workingdir = AtlassGen.makedir(os.path.join(outlasdir, '{0}_OrthoDem'.format(dt))).replace('\\','/')
     tileddir = AtlassGen.makedir(os.path.join(workingdir, '1_Tiled')).replace('\\','/')
     noiseremoveddir = AtlassGen.makedir(os.path.join(workingdir, '2_Noise_removed')).replace('\\','/')
     lasground = AtlassGen.makedir(os.path.join(workingdir, '3_Ground')).replace('\\','/')
@@ -280,7 +276,6 @@ def main():
     for file in files:
     
         path, filename, ext = AtlassGen.FILESPEC(file)
-        x,y=filename.split('_')  
 
         #files
         input = file
@@ -298,7 +293,7 @@ def main():
 
     MERGE_TASKS={}
 
-    print('Merging Started')
+
     for result in TILE_RESULTS:
         log.write(result.log)  
         if result.success:
@@ -313,6 +308,7 @@ def main():
         MERGE_TASKS[key]= AtlassTask(key, MergeTiles, input, output, filetype)
     
     MERGE_RESULTS=p.map(AtlassTaskRunner.taskmanager,MERGE_TASKS.values())
+    print('\nTiling : Completed')
     #Making tilelayout file
     ######################################################################################################################
     print("\n\nMaking tilelayout file : Started \n")

@@ -40,10 +40,10 @@ from Atlass_beta1 import *
 @Gooey(program_name="Tile Strip", use_legacy_titles=True, required_cols=1, default_size=(800, 500))
 def param_parser():
     parser=GooeyParser(description="Tile Strip")
-    parser.add_argument("input_folder", metavar="Files", widget="DirChooser", help="Select input las/laz files", default='')
+    parser.add_argument("input_folder", metavar="Input Directory", widget="DirChooser", help="Select input las/laz files", default='')
+    parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="")
     parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
     parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.laz')
-    parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="")
     parser.add_argument("cores", metavar="Number of Cores", help="Number of cores", type=int, default=4, gooey_options={
             'validator': {
                 'test': '2 <= int(user_input) <= 14',
@@ -82,8 +82,8 @@ def TileStrip(input, outputpath, tilesize,filetype):
     
     finally:
         outputfiles = glob.glob(outputpath+"\\*."+filetype)
-        print('\nTiling completed for {0}, generated {1}\n{2}'.format(input, len(outputfiles), list(outputfiles)))
-        log = '\nTiling completed for {0}, generated {1}\n{2}'.format(input, len(outputfiles), list(outputfiles))
+        print('\nTiling completed for {0}, generated {1}'.format(input, len(outputfiles)))
+        log = '\nTiling completed for {0}, generated {1}'.format(input, len(outputfiles))
         return (True, outputfiles, log)
 
  
@@ -157,8 +157,7 @@ def main():
     for file in files:
     
         path, filename, ext = AtlassGen.FILESPEC(file)
-        x,y=filename.split('_')  
-
+   
         #files
         input = file
         outputpath=AtlassGen.makedir(os.path.join(workingdir,filename))
