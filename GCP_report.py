@@ -227,7 +227,55 @@ def ClassifyGround(input, output, tile, buffer, step, spike, downspike, bulge, o
             return (False, None, log)
 
 
+def classifyFile(tilelayout,buffer,inputfolder,noiseremoveddir,grounddir,filetype,filename,points,gndclasses,noisestep,isopoints, gndstep, spike, downspike, bulge, offset):
 
+
+        
+    #Remove noise
+    #######################################################################################################################
+    input = '{0}/{1}.{2}'.format(inputfolder, filename, filetype)
+    output = '{0}/{1}.{2}'.format(noiseremoveddir, filename, filetype)
+
+
+    
+    NOISE_RESULTS=NoiseRemove(input, output, noisestep, isopoints, filetype)
+
+    #Classify ground
+    #######################################################################################################################
+
+    log = ""
+    if NOISE_RESULTS[0]:
+        tilename = filename
+
+        #Get Neigbouring las files
+        print('Creating tile neighbourhood for : {0}'.format(tilename))
+        tile = tilelayout.gettile(tilename)
+        neighbourlasfiles = []
+
+        try:
+            neighbours = tile.getneighbours(buffer)
+        except:
+            print("tile: {0} does not exist in geojson file".format(tilename))
+
+        #print('Neighbourhood of {0} las files detected in/overlapping {1}m buffer of :{2}\n'.format(len(neighbours),buffer,tilename))
+
+        for neighbour in neighbours:
+            neighbour = os.path.join(noiseremoveddir,'{0}.{1}'.format(neighbour, filetype)).replace('\\','/')
+
+            if os.path.isfile(neighbour):
+                neighbourlasfiles.append(neighbour)
+
+        input = neighbourlasfiles
+        output = os.path.join(grounddir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')
+        MAKE_GROUND_RESULTS = ClassifyGround(input, output, tile, buffer, gndstep, spike, downspike, bulge, offset)
+
+    if MAKE_GROUND_RESULTS[0]:
+        log = 'Ground classification for {0} : Completed'.format(filename)
+        return (True, output, log)
+    
+    else:
+        log = 'Ground classification for {0} : FAILED'.format(filename)
+        return (False, None, log)
 
 #-----------------------------------------------------------------------------------------------------------------
 #Main entry point
@@ -273,74 +321,17 @@ def main(argv):
     lines = [line.rstrip('\n')for line in open(control)]
     index=0
 
-#Clssify
-##############################################################################################################################
+
     if classify:
 
         noiseremoveddir = AtlassGen.makedir(os.path.join(outputpath, 'Noise_Removed'))
         grounddir = AtlassGen.makedir(os.path.join(outputpath, 'Ground'))
-        NOISE_TASK={}
 
-        #Remove noise
-        #######################################################################################################################
-        print('\n\nRemoving Noise : Started')
-        for file in lasfiles:
-            path,tilename,ext = AtlassGen.FILESPEC(file)
-            input = file
-            output = os.path.join(noiseremoveddir, '{0}.{1}'.format(tilename,filetype))
-            NOISE_TASK[tilename] = AtlassTask(tilename, NoiseRemove, input, output, args.noisestep, args.isopoints, filetype)
 
-        p=Pool(processes=int(args.noisecores))       
-        NOISE_RESULTS=p.map(AtlassTaskRunner.taskmanager,NOISE_TASK.values())
-        print('\nRemoving Noise : Completed')
 
-        #Classify ground
-        #######################################################################################################################
-
-        MAKE_GROUND_TASKS = {}
-
-        print('\n\nAdding buffer')
-        for result in NOISE_RESULTS:
-            log.write(result.log)
-
-            if result.success:
-                tilename = result.name
-
-                #Get Neigbouring las files
-                print('Creating tile neighbourhood for : {0}'.format(tilename))
-                tile = tilelayout.gettile(tilename)
-                neighbourlasfiles = []
-
-                try:
-                    neighbours = tile.getneighbours(buffer)
-                except:
-                    print("tile: {0} does not exist in geojson file".format(tilename))
-
-                #print('Neighbourhood of {0} las files detected in/overlapping {1}m buffer of :{2}\n'.format(len(neighbours),buffer,tilename))
-
-                for neighbour in neighbours:
-                    neighbour = os.path.join(noiseremoveddir,'{0}.{1}'.format(neighbour, filetype)).replace('\\','/')
-
-                    if os.path.isfile(neighbour):
-                        neighbourlasfiles.append(neighbour)
-
-                input = neighbourlasfiles
-                output = os.path.join(grounddir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')
-                MAKE_GROUND_TASKS[tilename] = AtlassTask(tilename, ClassifyGround, input, output, tile, buffer, args.gndstep, args.spike, args.downspike, args.bulge, args.offset)
-                #ClassifyGround(input, output, tile, buffer, demstep, spike, downspike, bulge, offset)
-        print('\n\nGround classification : Started')
-
-        p=Pool(processes=int(args.cores))       
-        MAKE_GROUND_RESULTS=p.map(AtlassTaskRunner.taskmanager,MAKE_GROUND_TASKS.values())
-
-        for result in MAKE_GROUND_RESULTS:
-            log.write(result.log)
-        
-        print('\nGround classification : Completed')
-        
-        lasfiles=AtlassGen.FILELIST (filepattern, grounddir)
+    # Read the GCP files to get the GCP points
+    #######################################################################################################################
     
- 
     GCPTile={}
     results = []
     for line in lines:
@@ -367,17 +358,45 @@ def main(argv):
                 else:
                     GCPTile[tile.name]=[[index,x,y,z]]
           
-
-# Generate the results files for tiles that has GCP
-##############################################################################################################################
-    TASKS={}      
+    print('GCP Points found in {0} files'.format(len(GCPTile)))
+    #Classify and Generate the results files for tiles that has GCP
+    ##############################################################################################################################
+    GEN_CONTROL_TASKS={}      
+    CLASSIFY_TASK={}
     for tile in GCPTile.keys():
+
         points=GCPTile[tile]
-        TASKS[tile]= AtlassTask(tile, CGPCheck,tilelayout,buffer,inputfolder,outputpath,filetype,tile,points,gndclasses)
+
+        if classify:
+            CLASSIFY_TASK[tile] = AtlassTask(tile, classifyFile,tilelayout,buffer,inputfolder,noiseremoveddir,grounddir,filetype,tile,points, gndclasses,args.noisestep, args.isopoints, args.gndstep, args.spike, args.downspike, args.bulge, args.offset)
+        
+        else:
+            GEN_CONTROL_TASKS[tile]= AtlassTask(tile, CGPCheck,tilelayout,buffer,inputfolder,outputpath,filetype,tile,points,gndclasses)
         #CGPCheck(tilelayout,buffer,outputpath,filetype,tile,points,gndclasses)
     
-    p=Pool(processes=cores)      
-    results=p.map(AtlassTaskRunner.taskmanager,TASKS.values())
+    if classify:
+        print("Starting ground classification")
+        p=Pool(processes=cores)      
+        classify_results=p.map(AtlassTaskRunner.taskmanager,CLASSIFY_TASK.values())
+
+        for result in classify_results:
+            if result.success:
+                tile = result.name
+                print(result.name)
+                points = GCPTile[tile]
+                inputfolder = grounddir
+                GEN_CONTROL_TASKS[tile]= AtlassTask(tile, CGPCheck,tilelayout,buffer,inputfolder,outputpath,filetype,tile,points,gndclasses)
+            else:
+                print("Could not classify {0}, Continuing without ........".format(result.name))
+                
+        
+        p=Pool(processes=cores)      
+        results=p.map(AtlassTaskRunner.taskmanager,GEN_CONTROL_TASKS.values())
+        lasfiles = glob.glob('{0}/*.{1}'.format(grounddir,filetype))
+
+    else:
+        p=Pool(processes=cores)      
+        results=p.map(AtlassTaskRunner.taskmanager,GEN_CONTROL_TASKS.values())
 
 
 # Generate the statistical report
