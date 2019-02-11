@@ -25,6 +25,7 @@ def param_parser():
     #parser.add_argument("hydrofiles", metavar="Hydro LAS files", widget="MultiFileChooser", help="Select Hydro files (las/laz )", default='')
     parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
     parser.add_argument("aoi", metavar="AOI", widget="FileChooser", help="Area of interest(.shp file)", default="")
+    parser.add_argument("tilesize", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
     parser.add_argument("contourinterval", metavar="Contour interval", help="Provide contour interval", default='0.5')
     parser.add_argument("indexinterval", metavar="Index Interval", help="Provide interval for contour index", default='5')
     parser.add_argument("zone", metavar="Zone", help="Provide Zone", default='')
@@ -38,7 +39,7 @@ def param_parser():
 #Function definitions
 #-----------------------------------------------------------------------------------------------------------------
 
-def makegmsfiles(filename,inpath,outpath,buffoutpath,clipoutpath,tile,zone, AOI_clip, index):
+def makegmsfiles(filename,inpath,outpath,buffoutpath,clipoutpath,xmin,ymin,zone, AOI_clip, index, tilesize):
 
     template = "\\\\10.10.10.100\\projects\\PythonScripts\\templates\\Template.gms"
     dstfile = os.path.join(outpath,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
@@ -68,13 +69,13 @@ def makegmsfiles(filename,inpath,outpath,buffoutpath,clipoutpath,tile,zone, AOI_
             while '<AOI_clip>' in data:
                 data = data.replace('<AOI_clip>', AOI_clip)
             while '<xmin>' in data:
-                data = data.replace('<xmin>', str(tile.xmin))
+                data = data.replace('<xmin>', str(xmin))
             while '<ymin>' in data:
-                data = data.replace('<ymin>', str(tile.ymin))
+                data = data.replace('<ymin>', str(ymin))
             while '<xmax>' in data:
-                data = data.replace('<xmax>', str(tile.xmax))
+                data = data.replace('<xmax>', str(xmin+tilesize))
             while '<ymax>' in data:
-                data = data.replace('<ymax>', str(tile.ymax))
+                data = data.replace('<ymax>', str(ymin+tilesize))
             while '<index>' in data:
                 data = data.replace('<index>', str(index))
 
@@ -116,10 +117,10 @@ def rungmsfiles(gmpath, gmsfile):
         return (False,None, log)
 
 
-def makecontours(neighbourfiles, output, tile, filename, buffer, contourinterval):
+def makecontours(neighbourfiles, output, x, y, filename, buffer, contourinterval, tilesize):
     log = ''
     #set up clipping
-    keep='-keep_xy {0} {1} {2} {3}'.format(tile.xmin-buffer, tile.ymin-buffer, tile.xmax+buffer, tile.ymax+buffer)
+    keep='-keep_xy {0} {1} {2} {3}'.format(x-buffer, y-buffer, x+tilesize+buffer, y+tilesize+buffer)
     keep=keep.split()
 
     try:
@@ -168,7 +169,7 @@ def main():
         filelist = glob.glob(inputfolder+"\\"+pattern)
         for file in filelist:
             contourfiles.append(file)
-    print('Number of Files found : {0} '.format(len(contourfiles)))
+    print('Number of Files founds : {0} '.format(len(contourfiles)))
 
     tilelayoutfile = args.layoutfile
     outpath = args.outputpath
@@ -180,6 +181,7 @@ def main():
     cores = args.cores
     contourinterval = args.contourinterval
     index = float(contourinterval)*(float(args.indexinterval))
+    tilesize = args.tilesize
 
     al = Atlasslogger(outpath)
 
@@ -195,8 +197,7 @@ def main():
     contour_buffered_out_path = AtlassGen.makedir(os.path.join(outpath, (dt+'_makeContour')))
     gms_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'scripts'))
     bufferedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, ('buffered_{0}m_contours'.format(buffer))))
-    bufferremoved_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'buffer_removed'))
-    clippedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'clipped'))
+    clippedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, ('clipped'.format(buffer))))
 
     #Make Contour Files
     mk_contour_tasks = {}
@@ -205,13 +206,13 @@ def main():
         x,y=filename.split('_')
         tile = tilelayout.gettile(filename)
         #file
-        output = os.path.join(bufferedout_path,'{0}.{1}'.format(tile.name,'shp')).replace('\\','/')
+        output = os.path.join(contour_buffered_out_path,'{0}.{1}'.format(tile.name,'shp')).replace('\\','/')
         neighbourfiles = []
         neighbours = tile.getneighbours(buffer)
         for neighbour in neighbours:
             neighbourfiles.append(os.path.join(path,'{0}.{1}'.format(neighbour,ext)).replace('\\','/'))
 
-        mk_contour_tasks[filename] = AtlassTask(filename, makecontours, neighbourfiles, output, tile, filename, int(buffer), contourinterval)        
+        mk_contour_tasks[filename] = AtlassTask(filename, makecontours, neighbourfiles, output, int(x), int(y), filename, int(buffer), contourinterval, int(tilesize))        
         
     p=Pool(processes=cores)      
     mk_contour_results=p.map(AtlassTaskRunner.taskmanager,mk_contour_tasks.values())
@@ -224,9 +225,8 @@ def main():
         if result.success:
             path, filename, ext = AtlassGen.FILESPEC(result.result)
             x,y=filename.split('_')
-            tile = tilelayout.gettile(filename)
-       
-            mk_gmsfiles_tasks[filename] = AtlassTask(filename, makegmsfiles,filename,bufferedout_path,gms_path,bufferremoved_path,clippedout_path,tile, zone, aoi, index)
+
+            mk_gmsfiles_tasks[filename] = AtlassTask(filename, makegmsfiles,filename,contour_buffered_out_path,gms_path,bufferedout_path,clippedout_path,int(x),int(y), zone, aoi, index, int(tilesize))
         
         
     mk_gmsfiles_results=p.map(AtlassTaskRunner.taskmanager,mk_gmsfiles_tasks.values())

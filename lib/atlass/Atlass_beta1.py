@@ -2,6 +2,8 @@ import os
 import io
 import sys
 import glob
+import statistics
+import math
 from subprocess import Popen, PIPE
 from multiprocessing import Process, Queue, pool
 import time
@@ -346,8 +348,6 @@ class AtlassTile():
         txt=txt[:-1]+'},'+'"geometry":{"type": "Polygon","coordinates":'+'[[[{0},{1}],[{2},{1}],[{2},{3}],[{0},{3}],[{0},{1}]]]'.format(self.xmin,self.ymin,self.xmax,self.ymax)+'}}'
 
         return txt
-
-
 class AtlassTileLayout():
     fileNo = 0
     def __init__(self):
@@ -441,8 +441,6 @@ class AtlassTileLayout():
 
     def __len__(self):
         return len(self.tiles.keys())
-
-
 class Atlasslogger(list):
     loginfo = []
     def __init__(self, outpath):
@@ -501,8 +499,6 @@ class Atlasslogger(list):
         dumps = {}
         dumps['Tasks']=(Atlasslogger.loginfo)
         json.dump(dumps, self.jlog, indent=4)
-
-
 class AtlassTask():
     '''
     Stores task related data that is used during multiprocessing
@@ -518,8 +514,6 @@ class AtlassTask():
 
     def __repr__(self):
         return 'Task object:\n\n\nTask({0},{1},{2})\n\nStatus: {3} {4}\n\nLog:{5}'.format(self.name,self.args,self.kwargs,self.success, self.result,self.log)
-
-
 
 class AtlassTaskRunner():
 
@@ -547,6 +541,116 @@ class AtlassTaskRunner():
         task.log=log
 
         return task
+
+class Point(object):
+    def __init__(self,index,x,y,lidarz,controlz, dz, accepted=True, dzshifted=None, dzshiftedsq=None ):
+        self.index=index
+        self.x=x 
+        self.y=y
+        self.lidarz = lidarz
+        self.controlz=controlz
+        self.dz = dz
+        self.accepted = accepted
+        self.dzshifted = dzshifted
+        self.dzshiftedsq = dzshiftedsq
+
+    def __repr__(self):
+        return (str(self.index),str(self.x), str(self.y), str(self.lidarz), str(self.controlz), str(self.dz))
+    
+        
+class PointList:
+    caltime = 0
+    def __init__(self):
+        self.points=OrderedDict()
+        self.initalaverage = None
+        self.initalstddev = None
+        self.finalaverage = None
+        self.finalstddev = None
+        self.rmse = None
+        self.ci95 = None
+        pass    
+
+    def addPoint(self, *args):
+        self.points[args[0]]=Point(args[0], args[1], args[2], args[3], args[4], args[5])
+
+    def calc_sum(self, attr):
+        sm = sum(float(getattr(point, attr)) for key, point in self.points.items())
+        return sm
+
+    def calc_average(self, attr):
+        data = []
+        for key, point in self.points.items():
+            if point.accepted:
+                data.append(getattr(point, attr))
+
+        av = round(statistics.mean(data), 4)
+        if PointList.caltime<1:
+            self.initalaverage = av
+        else:
+            self.finalaverage = av
+        return av
+
+    def calc_stdev(self, attr):
+        data = []
+        for key, point in self.points.items():
+            if point.accepted:
+                data.append(getattr(point, attr))
+        std = round(statistics.stdev(data), 4)
+        if PointList.caltime<1:
+            self.initalstddev = std
+        else:
+            self.finalstddev = std
+        PointList.caltime += 1
+        return std
+
+    def filter_data(self, tsigma):
+        rejected = 0
+        accepted = 0
+        if self.initalaverage:
+            filterval_upper = self.initalaverage + tsigma
+            filterval_lower = self.initalaverage - tsigma
+            print('Data range : {0} - {1}'.format(filterval_lower,filterval_upper))
+            for point in self.points.values():
+
+                if (  filterval_lower < point.dz < filterval_upper):
+                    point.accepted = True
+                    accepted +=1
+                else:
+                    point.accepted = False
+                    rejected +=1
+        else:
+            print("Inital average not calculated !")
+            exit()
+
+        self.calc_average('dz')
+        print("Final average : {0}".format(self.finalaverage))
+        self.calc_stdev('dz')
+        print("Final Sigma : {0}".format(self.finalstddev))
+
+        if self.finalaverage:
+            dzsqsum = []
+            for point in self.points.values():
+                if point.accepted:
+                    shiftval = (point.dz - self.finalaverage)
+                    point.dzshifted = round(shiftval, 4)
+                    point.dzshiftedsq = round(shiftval*shiftval, 4)
+                    dzsqsum.append(point.dzshiftedsq)
+                else:
+                    point.dzshifted = 'Rejected'
+
+            dsqmean = round(statistics.mean(dzsqsum), 4)
+            self.rmse = round(math.sqrt(dsqmean), 4)
+            self.ci95 = round(1.96*self.rmse, 4)
+
+        return (accepted, rejected)
+
+    def __len__(self):
+        return len(self.points.keys())
+
+    def __iter__(self):
+        for key,item in self.points.items():
+            yield item
+
 
 class AtlassGen():
 

@@ -43,7 +43,7 @@ def param_parser():
     parser=GooeyParser(description="Tile Strip")
     parser.add_argument("input_folder", metavar="Input Directory", widget="DirChooser", help="Select input las/laz files", default='')
     parser.add_argument("output_dir", metavar="Output Directory",widget="DirChooser", help="Output directory", default="")
-    parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='500')
+    parser.add_argument("tile_size", metavar="Tile size", help="Select Size of Tile in meters [size x size]", choices=['100', '250', '500', '1000', '2000'], default='1000')
     parser.add_argument("filepattern",metavar="Input File Filter Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.las')
     parser.add_argument("file_type",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='las')
     gnd_group = parser.add_argument_group("Ground Settings", gooey_options={'show_border': True,'columns': 5})
@@ -60,19 +60,19 @@ def param_parser():
     cores_group = parser.add_argument_group("Cores Settings", gooey_options={'show_border': True,'columns': 3} )
     cores_group.add_argument("--noisecores", metavar="Noise", help="Number of Cores to be used for noise removal process (Should be a small number)", type=int, default=4, gooey_options={
         'validator': {
-            'test': '2 <= int(user_input) <= 20',
-            'message': 'Must be between 2 and 20'
+            'test': '2 <= int(user_input) <= 14',
+            'message': 'Must be between 2 and 14'
         }})
     cores_group.add_argument("--tilingcores", metavar="Tiling", help="Number of cores to be used for tiling process", type=int, default=4, gooey_options={
             'validator': {
-                'test': '2 <= int(user_input) <= 20',
-                'message': 'Must be between 2 and 20'
+                'test': '2 <= int(user_input) <= 14',
+                'message': 'Must be between 2 and 14'
             }})
 
     cores_group.add_argument("--cores", metavar="General", help="Number of Cores to be used for normal operations", type=int, default=4, gooey_options={
     'validator': {
-        'test': '2 <= int(user_input) <= 20',
-        'message': 'Must be between 2 and 20'
+        'test': '2 <= int(user_input) <= 14',
+        'message': 'Must be between 2 and 14'
     }})
     parser.add_argument("buffer", metavar="Buffer", help="Buffer to generate the neighbourhood", default=200, type=int)
     parser.add_argument("-classify", metavar="Tile & Classify", help="Tick if Tiling and ground classification is required", action= "store_true")
@@ -205,7 +205,7 @@ def MakeDEM(x, y, tilename, gndfile, output, buffer, step,tilesize):
 
     try:        
         subprocessargs=['C:/LAStools/bin/blast2dem.exe','-i',gndfile,'-oasc','-o', output,'-nbits',32,'-kill',200,'-step',step,'-keep_class', 2] 
-        #subprocessargs=subprocessargs+['-ll',x,y,'-ncols',math.ceil((tilesize)/step), '-nrows',math.ceil((tilesize)/step)]    - requested by Eleanor to leave the buffer 
+        subprocessargs=subprocessargs+['-ll',x,y,'-ncols',math.ceil((tilesize)/step), '-nrows',math.ceil((tilesize)/step)]    
         #ensures the tile is not buffered by setting lower left coordinate and num rows and num cols in output grid.
         subprocessargs=list(map(str,subprocessargs))  
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
@@ -260,8 +260,8 @@ def main():
 
 
     buffer = args.buffer
-    print('\n\nWorking on files in  : {0}'.format(inputfolder))
 
+    '''
     if classify:
         #Tiling
         ######################################################################################################################
@@ -307,7 +307,6 @@ def main():
         print('\nTiling : Completed')
         #Making tilelayout file
         ######################################################################################################################
-        print('\n\nWorking on files in  : {0}'.format(inputfolder))
         print("\n\nMaking tilelayout file : Started \n")
 
         jsonfile = os.path.join(tileddir,'TileLayout.json')
@@ -328,7 +327,7 @@ def main():
         #remove noise
         ######################################################################################################################
 
-        noiseremoveddir = AtlassGen.makedir(os.path.join(workingdir, '2_Noise_removed')).replace('\\','/')
+       
         NOISE_TASK={}
 
         print('\n\nRemoving Noise : Started')
@@ -346,49 +345,52 @@ def main():
 
         #Classify ground
         #######################################################################################################################
-        lasground = AtlassGen.makedir(os.path.join(workingdir, '3_Ground')).replace('\\','/')
+    '''
+    lasground = AtlassGen.makedir(os.path.join(workingdir, '3_Ground')).replace('\\','/') 
+    noiseremoveddir = 'D:\\Python\\el\\190117_1452_OrthoDem\\2_Noise_removed'
+    jsonfile = "D:\\Python\el\\190117_1452_OrthoDem\\1_Tiled\\TileLayout.json"
+    files = glob.glob(noiseremoveddir + '\\*.las')
+    MAKE_GROUND_TASKS = {}
+    tilelayout = AtlassTileLayout()
+    tilelayout.fromjson(jsonfile)
+    print('\n\nAdding buffer')
+    for file in files:
+        #log.write(result.log)r ruoror
+        path, filename, ext = AtlassGen.FILESPEC(file)
+        #if result.success:euoeoeo
+        tilename = filename
 
-        MAKE_GROUND_TASKS = {}
-        print('\n\nWorking on files in  : {0}'.format(inputfolder))
-        print('\n\nAdding buffer')
-        for result in NOISE_RESULTS:
-            log.write(result.log)
+        #Get Neigbouring las files
+        print('Creating tile neighbourhood for : {0}'.format(tilename))
+        tile = tilelayout.gettile(tilename)
+        neighbourlasfiles = []
 
-            if result.success:
-                tilename = result.name
+        try:
+            neighbours = tile.getneighbours(buffer)
+        except:
+            print("tile: {0} does not exist in geojson file".format(tilename))
 
-                #Get Neigbouring las files
-                print('Creating tile neighbourhood for : {0}'.format(tilename))
-                tile = tilelayout.gettile(tilename)
-                neighbourlasfiles = []
+        #print('Neighbourhood of {0} las files detected in/overlapping {1}m buffer of :{2}\n'.format(len(neighbours),buffer,tilename))
 
-                try:
-                    neighbours = tile.getneighbours(buffer)
-                except:
-                    print("tile: {0} does not exist in geojson file".format(tilename))
+        for neighbour in neighbours:
+            neighbour = os.path.join(noiseremoveddir,'{0}.{1}'.format(neighbour, filetype)).replace('\\','/')
 
-                #print('Neighbourhood of {0} las files detected in/overlapping {1}m buffer of :{2}\n'.format(len(neighbours),buffer,tilename))
+            if os.path.isfile(neighbour):
+                neighbourlasfiles.append(neighbour)
 
-                for neighbour in neighbours:
-                    neighbour = os.path.join(noiseremoveddir,'{0}.{1}'.format(neighbour, filetype)).replace('\\','/')
+        input = neighbourlasfiles
+        output = os.path.join(lasground,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')
+        MAKE_GROUND_TASKS[tilename] = AtlassTask(tilename, ClassifyGround, input, output, tile, buffer, args.gndstep, args.spike, args.downspike, args.bulge, args.offset)
+        #ClassifyGround(input, output, tile, buffer, demstep, spike, downspike, bulge, offset)
+    print('\n\nGround classification : Started')
 
-                    if os.path.isfile(neighbour):
-                        neighbourlasfiles.append(neighbour)
-
-                input = neighbourlasfiles
-                output = os.path.join(lasground,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')
-                MAKE_GROUND_TASKS[tilename] = AtlassTask(tilename, ClassifyGround, input, output, tile, buffer, args.gndstep, args.spike, args.downspike, args.bulge, args.offset)
-                #ClassifyGround(input, output, tile, buffer, demstep, spike, downspike, bulge, offset)
-        print('\n\nGround classification : Started')
-
-        p=Pool(processes=int(args.cores))       
-        MAKE_GROUND_RESULTS=p.map(AtlassTaskRunner.taskmanager,MAKE_GROUND_TASKS.values())
-        files = glob.glob("{0}\\*.{1}".format(lasground, filetype))
-        print('\nGround classification : Completed')
+    p=Pool(processes=int(args.cores))       
+    MAKE_GROUND_RESULTS=p.map(AtlassTaskRunner.taskmanager,MAKE_GROUND_TASKS.values())
+    files = glob.glob("{0}\\*.{1}".format(lasground, filetype))
+    print('\nGround classification : Completed')
 
     #Make DEM
     #######################################################################################################################
-    print('\n\nWorking on files in  : {0}'.format(inputfolder))
     print('\n\nMaking DEM : Started')
 
     demdir = AtlassGen.makedir(os.path.join(workingdir, '4_DEM')).replace('\\','/')

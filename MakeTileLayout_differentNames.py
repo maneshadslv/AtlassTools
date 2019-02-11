@@ -110,8 +110,14 @@ def main():
     #make a tile layout index
     for file in files:
         filepath,filename,extn=AtlassGen.FILESPEC(file)
-        x,y=filename.split('_')
-        tilelayout.addtile(name=filename, xmin=float(x), ymin=float(y), xmax=float(x)+tilesize, ymax=float(y)+tilesize)
+        # *********** MUST change acording the naming convention of the file
+        prj, bla, xy , zone, b, c =filename.split('_')
+        # ********** Must change acording to how the xy is represented in the file name
+        x = int(xy[0:3])*1000
+        y = int(xy[3:7])*1000
+        name = ('{0}_{1}'.format(x,y))
+        print(x,y)
+        tilelayout.addtile(name=name, xmin=float(x), ymin=float(y), xmax=float(x)+tilesize, ymax=float(y)+tilesize, file_name=filename)
          
     jsonfile = tilelayout.createGeojsonFile(jsonfile)
 
@@ -144,9 +150,15 @@ def main():
 
             for file in files:
                 filepath,filename,extn=AtlassGen.FILESPEC(file)
-                x,y=filename.split('_')
+                # *********** MUST change acording the naming convention of the file
+                prj, bla, xy , zone, b, c =filename.split('_')
+                # ********** Must change acording to how the xy is represented in the file name
+                x = int(xy[0:3])*1000
+                y = int(xy[3:7])*1000
+                name = '{0}_{1}'.format(x,y)
+                print(x,y)
                 boxcoords=AtlassGen.GETCOORDS([x,y],tilesize)
-                f.write( '\nBlock {0}.{1}\n'.format(filename,extn))
+                f.write( '\nBlock {0}.{1}\n'.format(name,extn))
                 for i in boxcoords:
                     f.write(  ' {0} {1}\n'.format(i[0],i[1]))
 
@@ -158,10 +170,16 @@ def main():
 
         for file in files:
             filepath,filename,extn=AtlassGen.FILESPEC(file)
-            x,y=filename.split('_')
+            # *********** MUST change acording the naming convention of the file
+            prj, bla, xy , zone, b, c =filename.split('_')
+            # ********** Must change acording to how the xy is represented in the file name
+            x = int(xy[0:3])*1000
+            y = int(xy[3:7])*1000
+            name = ('{0}_{1}'.format(x,y))
+            print(x,y)
             boxcoords=AtlassGen.GETCOORDS([x,y],tilesize)
             w.line(parts=[[boxcoords[0],boxcoords[1],boxcoords[2],boxcoords[3],boxcoords[4]]])
-            w.record(TILE_NAME='{0}'.format(filename), XMIN='{0}'.format(boxcoords[0][0]),YMIN='{0}'.format(boxcoords[0][1]),XMAX='{0}'.format(boxcoords[2][0]),YMAX='{0}'.format(boxcoords[2][1]),TILENUM='t{0}{1}'.format(int(boxcoords[0][0]/1000),int(boxcoords[0][1]/1000)))
+            w.record(TILE_NAME='{0}'.format(name), XMIN='{0}'.format(boxcoords[0][0]),YMIN='{0}'.format(boxcoords[0][1]),XMAX='{0}'.format(boxcoords[2][0]),YMAX='{0}'.format(boxcoords[2][1]),TILENUM='t{0}{1}'.format(int(boxcoords[0][0]/1000),int(boxcoords[0][1]/1000)))
         
         w.save(prjfile.replace('.prj','_shapefile'))           
         print("Making shp file : Completed\n")

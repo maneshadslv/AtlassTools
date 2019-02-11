@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import os, glob
 import numpy as np
+import urllib
 from gooey import Gooey, GooeyParser
 import time
 import datetime
@@ -414,9 +415,17 @@ def makeDEM(xmin, ymin, xmax, ymax, gndfile, workdir, dtmfile, buffer, kill, ste
         #make dem -- simple tin to DEM process made with buffer and clipped  back to the tile boundary
         print("Checking for Hydro files")
         if not hydropoints==None:
+
+            
+            hydfile=os.path.join(workdir,'{0}_{1}_hydro.{2}'.format(xmin, ymin,filetype)).replace('\\','/')
+            subprocessargs=['C:/LAStools/bin/las2las.exe','-i'] + hydropoints + ['-merged','-o{0}'.format(filetype),'-o',hydfile] + keep 
+            subprocessargs=list(map(str,subprocessargs))
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
+            print("clipped Hydro points")
+
             gndfile2 = gndfile
             gndfile=os.path.join(workdir,'{0}_{1}_dem_hydro.{2}'.format(xmin, ymin,filetype)).replace('\\','/')
-            subprocessargs=['C:/LAStools/bin/las2las.exe','-i', gndfile2,'-merged','-o{0}'.format(filetype),'-o',gndfile] + keep 
+            subprocessargs=['C:/LAStools/bin/las2las.exe','-i', gndfile2,hydfile,'-merged','-o{0}'.format(filetype),'-o',gndfile] + keep 
             subprocessargs=list(map(str,subprocessargs))
             p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
             print("added Hydro points")
@@ -520,30 +529,50 @@ def index(input):
     except:
         return(False, None, "Error")
 
-def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, buffer, tile):
+def buffertiles(input, bufffile, filetype, buffer, tile):
     log=''
-    cleanup=[tempfile2]
-
-
+    
     if isinstance(input,str):
         input = [input]
-
     try:
 
-
         #not changing the classifciation, just creating a buffered unfiltered temp file.
-        subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+input+['-merged','-o{0}'.format(filetype),'-o',tempfile]
+        subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+input+['-merged','-o{0}'.format(filetype),'-o',bufffile]
         subprocessargs=subprocessargs+['-keep_xy',tile.xmin-buffer,tile.ymin-buffer,tile.xmax+buffer,tile.ymax+buffer]
         subprocessargs=list(map(str,subprocessargs)) 
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
     
-        subprocessargs=['C:/LAStools/bin/lasthin.exe','-i',tempfile,'-o{0}'.format(filetype),'-o',tempfile2,'-adaptive',vt,hz,'-classify_as',8,'-ignore_class'] + [0,1,3,4,5,6,7,9,10,11,12,13,14,15,16,17,18,19,20]
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
+
+    except Exception as e:
+        log = "Making buffered file for {0} /nException {1}".format(tile.name, e)
+        return(False,None, log)
+
+    finally:
+        if os.path.isfile(bufffile):
+            log = "Making buffered file for {0} Success".format(tile.name)
+            return (True,bufffile, log)
+
+        else: 
+            log = "Making buffered file for {} Failed".format(tile.name)
+            return (False,None, log)
+
+def makeMKP(bufffile, tempfile, output, filetype, gndclasses, hz, vt, buffer, xmin, ymin, tilesize):
+    log=''
+    cleanup=[tempfile]
+
+    try:
+
+        subprocessargs=['C:/LAStools/bin/lasthin.exe','-i',bufffile,'-o{0}'.format(filetype),'-o',tempfile,'-adaptive',vt,hz,'-classify_as',8,'-ignore_class'] + [0,1,3,4,5,6,7,9,10,11,12,13,14,15,16,17,18,19,20]
         subprocessargs=list(map(str,subprocessargs))    
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
 
        
-        subprocessargs=['C:/LAStools/bin/las2las.exe','-i',tempfile2,'-o{0}'.format(filetype),'-o',output]
-        subprocessargs=subprocessargs+['-keep_xy',tile.xmin,tile.ymin,tile.xmax,tile.ymax]
+        subprocessargs=['C:/LAStools/bin/las2las.exe','-i',tempfile,'-o{0}'.format(filetype),'-o',output]
+        subprocessargs=subprocessargs+['-keep_xy',xmin,ymin,xmin+tilesize,ymin+tilesize]
         subprocessargs=list(map(str,subprocessargs))    
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
         
@@ -553,12 +582,13 @@ def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, bu
         return (False,None,log)
 
     except Exception as e:
-        log = "Making MKP for {0} /nException {1}".format(tile.name, e)
+        log = "Making MKP for {0} /nException {1}".format(bufffile, e)
+        print(log)
         return(False,None, log)
 
     finally:
         if os.path.isfile(output):
-            log = "Making MKP for {0} Success".format(tile.name)
+            log = "Making MKP for {0} Success".format(bufffile)
             for file in cleanup:
                 if os.path.isfile(file):
                     os.remove(file)
@@ -567,7 +597,7 @@ def makeMKP(input, tempfile, tempfile2, output, filetype, gndclasses, hz, vt, bu
             return (True,output, log)
 
         else: 
-            log = "Making MKP for {} Failed".format(tile.name)
+            log = "Making MKP for {} Failed".format(bufffile)
             return (False,None, log)
 
 def clip(input, output, poly, filetype):
@@ -596,12 +626,16 @@ def clip(input, output, poly, filetype):
         log = "Clipping failed for {0}. Failed at Subprocess ".format(str(input)) 
         return(False, None, log)
 
-def makegrid(input, output, intensityMin,intensityMax):
- 
+def makegrid(input, output, intensityMin,intensityMax, xmin, ymin):
+
+    
     log = ''
 
     try:
-        subprocessargs=['C:/LAStools/bin/lasgrid.exe', '-i', input, '-step', 0.5, '-fill' ,2 ,'-keep_first', '-intensity_average', '-otif', '-nbits', 8 ,'-set_min_max', intensityMin , intensityMax, '-o', output, '-nrows', 2000, '-ncols', 2000]
+        '''
+        This function needs -ll <xmin> <ymin>
+        '''
+        subprocessargs=['C:/LAStools/bin/lasgrid.exe', '-i', input, '-step', 0.5, '-fill' ,2 ,'-keep_first', '-intensity_average', '-otif', '-nbits', 8 ,'-set_min_max', intensityMin , intensityMax, '-o', output, '-ll', xmin , ymin, '-nrows', 2000, '-ncols', 2000]
         subprocessargs=list(map(str,subprocessargs)) 
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
 
@@ -717,18 +751,14 @@ def main():
 
     p=Pool(processes=cores)      
     adjust_results=p.map(AtlassTaskRunner.taskmanager,adj_tasks.values())
-
+    
     ###########################################################################################################################
-    #MKP process
-    #use names from clipped las to decide which tiles to generate mkp from unclipped adjusted las.
+    #Create buffered file
 
-    '''
-    Revision: remove the check against clipped file list. Clipping will be done after this step.
 
-    '''
 
-    print('\n\n Starting MKP')
-    mkp_tasks = {}
+    print('\n\n Making buffered files')
+    buffer_tasks = {}
     for result in adjust_results:
         #tasklist={'ProcessName':'Run some tasks','fn'=func,'Tasks':{'tile/filename':{'args':args,'kwargs':kwargs,'status':False,'output':None,'log':'blah blah blah\n blah blah blah'}}}
         log.write(result.log)  
@@ -738,9 +768,8 @@ def main():
             
             #files
             input = os.path.join(adjdir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')  #adjusted las
-            output=os.path.join(mkpdir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')
             bufferedfile=os.path.join(workingdir,'{0}_buff.{1}'.format(tilename, filetype)).replace('\\','/')
-            tempfile2=os.path.join(mkpdir,'{0}_temp2.{1}'.format(tilename, filetype)).replace('\\','/')
+      
 
             #Get Neigbouring las files
             print('Creating tile neighbourhood for : {0}'.format(tilename))
@@ -760,10 +789,38 @@ def main():
                 if os.path.isfile(neighbour):
                     neighbourlasfiles.append(neighbour)
 
-            mkp_tasks[tilename] = AtlassTask(tilename, makeMKP, neighbourlasfiles, bufferedfile, tempfile2, output, filetype, gndclasses, hz, vt, buffer, tile)
+            buffer_tasks[tilename] = AtlassTask(tilename, buffertiles, input, bufferedfile, filetype, buffer, tile)
+  
 
+    buffer_results=p.map(AtlassTaskRunner.taskmanager,buffer_tasks.values())
+
+    ###########################################################################################################################
+    #MKP process
+    #use names from clipped las to decide which tiles to generate mkp from unclipped adjusted las.
+
+
+    #Revision: remove the check against clipped file list. Clipping will be done after this step.
+
+    
+    print("Starting MKP")
+    mkp_tasks = {}
+    for result in buffer_results:
+        log.write(result.log)
+        if result.success:
+  
+            tilename = result.name
+           
+            x,y=tilename.split('_') 
+            input = os.path.join(workingdir,'{0}_buff.{1}'.format(tilename, filetype)).replace('\\','/')
+            output=os.path.join(mkpdir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')
+            tempfile=os.path.join(mkpdir,'{0}_temp.{1}'.format(tilename, filetype)).replace('\\','/')
+            
+            mkp_tasks[tilename] = AtlassTask(tilename, makeMKP, input, tempfile, output, filetype, gndclasses, hz, vt, buffer, int(x), int(y), int(tilesize))
+    
+   
     mkp_results=p.map(AtlassTaskRunner.taskmanager,mkp_tasks.values())
 
+    
     ###########################################################################################################################
     #las index mkp las files
 
@@ -806,6 +863,9 @@ def main():
 
     clip_mkp_results=p.map(AtlassTaskRunner.taskmanager,clip_mkp_tasks.values())   
     
+
+
+
     ###########################################################################################################################
     #Make DEM with the adjusted las in the working directory
     #input buffered las file ?????
@@ -813,7 +873,8 @@ def main():
     print('Making DEM')
     dem_tasks = {}
     dem_results = []
-    for result in clip_mkp_results:
+    #for result in clip_mkp_results:
+    for result in buffer_results:
         log.write(result.log)
         if result.success:
             
@@ -840,7 +901,8 @@ def main():
         log.write(result.log)
         if result.success:
             tilename = result.name
-
+            
+            
             x,y=tilename.split('_') 
 
 
@@ -921,6 +983,13 @@ def main():
 
 
 
+    ##########################################################################################################################
+    #Download prj file for the requied zone
+
+    link = "http://spatialreference.org/ref/epsg/gda94-mga-zone-{0}/prj/".format(zone)
+    projfile = os.path.join(prodsdir, '{0}_tile_layout_shapefile.prj'.format(areaname)).replace("\\", "/")
+    prjfile = urllib.request.urlretrieve(link, projfile)
+    
 
     ###########################################################################################################################
     #MAKE XYZ from the dtm asci file, output xyz file in Products/<Area_Name>_DEM_1m/<Name>_2018_SW_<X>_<Y>_1k_1m.xyz
@@ -937,6 +1006,8 @@ def main():
 
             #files 
             input=os.path.join(dem1esridir,'{0}_2018_SW_{1}_{2}_1k_1m_esri.asc'.format(areaname, x, y)).replace('\\','/') #dtm asci file
+            prjfile1 = os.path.join(dem1esridir,'{0}_2018_SW_{1}_{2}_1k_1m_esri.prj'.format(areaname, x, y)).replace('\\','/')
+            shutil.copyfile(projfile, prjfile1) 
             output = os.path.join(dem1dir,'{0}_2018_SW_{1}_{2}_1k_1m.xyz'.format(areaname, x, y)).replace('\\','/')
 
             xyz_tasks[tilename] = AtlassTask(tilename, makeXYZ, input, output, filetype)
@@ -952,7 +1023,7 @@ def main():
     #MAKE GRID from the AHD las files, output tif file
     #makexyz
 
-    print('Making Grid')
+    print('Making Intensity Image')
     grid_tasks = {}
     for result in clip_demlaz_results:
         log.write(result.log)
@@ -965,7 +1036,7 @@ def main():
             input = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, 'las')).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
             output = os.path.join(intensitydir,'{0}_2018_SW_{1}_{2}_1k_50cm_INT.tif'.format(areaname, x, y)).replace("\\", "/")   #<inputpath>/Products/<Area_Name>_Intensity_50cm/<Name>_2018_SW_<X>_<Y>_1k_50cm_INT.tif
 
-            grid_tasks[tilename] = AtlassTask(tilename, makegrid, input, output, intensityMin,intensityMax)
+            grid_tasks[tilename] = AtlassTask(tilename, makegrid, input, output, intensityMin,intensityMax, int(x), int(y))
 
 
     grid_results=p.map(AtlassTaskRunner.taskmanager,grid_tasks.values())   
@@ -1054,7 +1125,9 @@ def main():
     
     w.save(prjfile.replace('.prj','_shapefile'))           
     print("Making shp file : Completed\n")
+    
 
+    print('Data available at : {0}'.format(outputpath))
     print('---------------------------------------------------------------------------------------------------------\nProcess Completed')
     log.close()
     return

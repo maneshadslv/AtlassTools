@@ -55,6 +55,7 @@ def param_parser():
     product_group.add_argument("-dsm", "--makeDSM", metavar="DSM", action='store_true')
     product_group.add_argument("-chm", "--makeCHM", metavar="CHM", action='store_true')
     product_group.add_argument("-hydro", "--makeHYDRO", metavar="Hydro", action='store_true')
+    product_group.add_argument("-merged", "--merged", metavar="Merged", action='store_true')
     main_parser.add_argument("-s", "--step", metavar="Step", help="Provide step", type=float, default = 1.0)
     main_parser.add_argument("-cs", "--chmstep",metavar="CHM step", help="Provide chmstep", type=float, default=2.0)
     main_parser.add_argument("-b", "--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
@@ -144,9 +145,15 @@ def MakeDEM(x, y, tilename, gndfile, workdir, dtmfile, buffer, kill, step, gndcl
         #make dem -- simple tin to DEM process made with buffer and clipped  back to the tile boundary
         print("Checking for Hydro files")
         if not hydropoints==None:
+            hydfile=os.path.join(workdir,'{0}_{1}_hydro.{2}'.format(x, y,filetype)).replace('\\','/')
+            subprocessargs=['C:/LAStools/bin/las2las.exe','-i'] + hydropoints + ['-merged','-o{0}'.format(filetype),'-o', hydfile] + keep 
+            subprocessargs=list(map(str,subprocessargs))
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
+            print("clipped Hydro points")
+
             gndfile2 = gndfile
-            gndfile=os.path.join(workdir,'{0}_dem_hydro.{1}'.format(tilename,filetype)).replace('\\','/')
-            subprocessargs=['C:/LAStools/bin/las2las.exe','-i', gndfile2,'-merged','-o{0}'.format(filetype),'-o',gndfile] + keep 
+            gndfile=os.path.join(workdir,'{0}_{1}_dem_hydro.{2}'.format(x,y,filetype)).replace('\\','/')
+            subprocessargs=['C:/LAStools/bin/las2las.exe','-i', gndfile2, hydfile,'-merged','-o{0}'.format(filetype),'-o',gndfile] + keep 
             subprocessargs=list(map(str,subprocessargs))
             p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
             print("added Hydro points")
@@ -453,6 +460,33 @@ def clip(input, output, poly, filetype):
         log = "Clipping failed for {0}. Failed at Subprocess ".format(str(input)) 
         return(False, None, log)
 
+def merge_product(clippeddir, output, step, filetype):
+   
+    input = '{0}/*.{1}'.format(clippeddir, filetype)
+    log=''
+    try:
+        #las2las -i (asciigridtolas_results.path)\*.laz -merged -step step -oasc -o product\merged\merged_"product".asc
+
+        subprocessargs=['C:/LAStools/bin/las2las.exe', '-i', input, '-merged', '-step', step, '-oasc', '-o', output]
+        subprocessargs=list(map(str,subprocessargs))    
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+        if os.path.isfile(output):
+            log = "Merged {0} output : {1}".format(str(input), str(output)) 
+            return (True,output, log)
+
+        else:
+            log = "Merging failed for {0}. ".format(str(input)) 
+            return (False,None,log)
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
+
+    except:
+        log = "Merging failed for {0}. Failed at Subprocess ".format(str(input)) 
+        return(False, None, log)
+    
 
 #-----------------------------------------------------------------------------------------------------------------
 #Main entry point
@@ -482,6 +516,7 @@ def main(argv):
     makeDSM=args.makeDSM
     makeCHM=args.makeCHM
     makeDEM=args.makeDEM
+    merged=args.merged
     cores = args.cores
     tilesize = args.tile_size
     filetype = args.filetype
@@ -524,7 +559,7 @@ def main(argv):
     tl = AtlassTileLayout()
     tl.fromjson(geojsonfile)
     dt = strftime("%y%m%d_%H%M")
-
+    '''
     workingdir = AtlassGen.makedir(os.path.join(outputpath, '{0}_makeGrid'.format(dt))).replace('\\','/')
     buffdir = AtlassGen.makedir(os.path.join(workingdir, 'buffered')).replace('\\','/')
 
@@ -641,6 +676,8 @@ def main(argv):
             asciigridtolas_results=p.map(AtlassTaskRunner.taskmanager,asciigridtolas_tasks.values())
 
 
+
+
             ###########################################################################################################################
             #Index the product laz files
             #index(demlazfile)
@@ -704,6 +741,18 @@ def main(argv):
 
             lastoasciigrid_results=p.map(AtlassTaskRunner.taskmanager,lastoasciigrid_tasks.values())
 
-        
+        '''
+        #############################################################################################################################
+        #Merging asc files
+
+    prodclippeddir = "D:\\Python\\test\\190208_1428_makeGrid\\DEM\\clipped"
+    proddir = "D:\\Python\\test\\190208_1428_makeGrid\\DEM"
+    product = "DEM"
+    prodmergeddir = AtlassGen.makedir(os.path.join(proddir, 'merged')).replace('\\','/')
+    output = os.path.join(prodmergeddir,'merged_{0}'.format(product)).replace('\\','/')
+
+    merge_product(prodclippeddir, output, step, filetype)
+                
+            
 if __name__ == "__main__":
     main(sys.argv[1:]) 
