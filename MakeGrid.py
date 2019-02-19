@@ -460,18 +460,23 @@ def clip(input, output, poly, filetype):
         log = "Clipping failed for {0}. Failed at Subprocess ".format(str(input)) 
         return(False, None, log)
 
-def merge_product(clippeddir, output, step, filetype):
+def merge_product(inputdir, mergedlasfile, output, step, filetype):
    
-    input = '{0}/*.{1}'.format(clippeddir, filetype)
+    input = '{0}/*.{1}'.format(inputdir, filetype)
     log=''
     try:
         #las2las -i (asciigridtolas_results.path)\*.laz -merged -step step -oasc -o product\merged\merged_"product".asc
 
-        subprocessargs=['C:/LAStools/bin/las2las.exe', '-i', input, '-merged', '-step', step, '-oasc', '-o', output]
+        subprocessargs=['C:/LAStools/bin/las2las.exe', '-i', input, '-merged', '-olas', '-o', mergedlasfile]
         subprocessargs=list(map(str,subprocessargs))    
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+        subprocessargs=['C:/LAStools/bin/lasgrid.exe','-i', mergedlasfile, '-merged','-oasc','-o', output, '-nbits',32,'-fill',0,'-step',step,'-elevation','-highest']
+        subprocessargs=list(map(str,subprocessargs))       
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
         if os.path.isfile(output):
-            log = "Merged {0} output : {1}".format(str(input), str(output)) 
+            log = "Merged input : {0} \nMerged output : {1}".format(str(input), str(output)) 
             return (True,output, log)
 
         else:
@@ -487,7 +492,6 @@ def merge_product(clippeddir, output, step, filetype):
         log = "Merging failed for {0}. Failed at Subprocess ".format(str(input)) 
         return(False, None, log)
     
-
 #-----------------------------------------------------------------------------------------------------------------
 #Main entry point
 #-----------------------------------------------------------------------------------------------------------------
@@ -559,7 +563,7 @@ def main(argv):
     tl = AtlassTileLayout()
     tl.fromjson(geojsonfile)
     dt = strftime("%y%m%d_%H%M")
-    '''
+
     workingdir = AtlassGen.makedir(os.path.join(outputpath, '{0}_makeGrid'.format(dt))).replace('\\','/')
     buffdir = AtlassGen.makedir(os.path.join(workingdir, 'buffered')).replace('\\','/')
 
@@ -675,7 +679,11 @@ def main(argv):
 
             asciigridtolas_results=p.map(AtlassTaskRunner.taskmanager,asciigridtolas_tasks.values())
 
+            
+            #if merged...
+                #las2las -i (asciigridtolas_results.path)\*.laz -merged -step step -oasc -o product\merged\merged_"product".asc
 
+            
 
 
             ###########################################################################################################################
@@ -740,19 +748,66 @@ def main(argv):
             
 
             lastoasciigrid_results=p.map(AtlassTaskRunner.taskmanager,lastoasciigrid_tasks.values())
+    
+      
 
-        '''
+        if merged:
         #############################################################################################################################
         #Merging asc files
+            print('Merging files for {0}'.format(product))
+            if clipshape:
+                #setting the input dir to clipped dir 
+                inputmerge = prodclippeddir
+            else:
+                asciigridtolas_tasks = {}
+                for result in results:
+                    log.write(result.log)  
+                    if result.success:
+                        tilename = result.name
 
-    prodclippeddir = "D:\\Python\\test\\190208_1428_makeGrid\\DEM\\clipped"
-    proddir = "D:\\Python\\test\\190208_1428_makeGrid\\DEM"
-    product = "DEM"
-    prodmergeddir = AtlassGen.makedir(os.path.join(proddir, 'merged')).replace('\\','/')
-    output = os.path.join(prodmergeddir,'merged_{0}'.format(product)).replace('\\','/')
+                        x,y=tilename.split('_') 
 
-    merge_product(prodclippeddir, output, step, filetype)
+                        #files
+                        input=os.path.join(proddir,'{0}_{1}.asc'.format(tilename, product)).replace('\\','/')
+                        output=os.path.join(proddir,'{0}_{1}.{2}'.format(tilename, product, filetype)).replace('\\','/')
+
+                        asciigridtolas_tasks[tilename] = AtlassTask(tilename, asciigridtolas, input, output, filetype)
                 
+
+                    asciigridtolas_results=p.map(AtlassTaskRunner.taskmanager,asciigridtolas_tasks.values())
+
+                    
+                    ###########################################################################################################################
+                    #Index the product laz files
+                    #index(demlazfile)
+
+                    
+                    index_tasks={}
+                    for result in asciigridtolas_results:
+                        log.write(result.log)  
+                        if result.success:
+                            tilename = result.name
+                            x,y=tilename.split('_') 
+                            file = os.path.join(proddir,'{0}_{1}.{2}'.format(tilename, product, filetype)).replace('\\','/')
+                            index_tasks[tilename] = AtlassTask(tilename, index, file)
+                    
+                
+                    index_results=p.map(AtlassTaskRunner.taskmanager,index_tasks.values())
+                    #setting the input directry to prodir if not clipped
+                    inputmerge = proddir
+
             
+            prodmergeddir = AtlassGen.makedir(os.path.join(proddir, 'merged')).replace('\\','/')
+            output = os.path.join(prodmergeddir,'merged_{0}.asc'.format(product)).replace('\\','/')
+            mergedlasfile = os.path.join(prodmergeddir,'merged_{0}.las'.format(product)).replace('\\','/')
+
+            result = merge_product(inputmerge, mergedlasfile, output, step, filetype)
+
+
+            print(result[2])
+            
+        
+if __name__ == "__main__":
+    main(sys.argv[1:]) 
 if __name__ == "__main__":
     main(sys.argv[1:]) 
