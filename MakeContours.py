@@ -7,30 +7,65 @@ from gooey import Gooey, GooeyParser
 import subprocess
 import datetime
 from time import strftime
-from shutil import copyfile
+import shutil 
+import math
 import glob
 from multiprocessing import Pool,freeze_support
 sys.path.append('{0}/lib/atlass/'.format(sys.path[0]).replace('\\','/'))
 from Atlass_beta1 import *
+from MakeContoursLib import *
+import fnmatch
 #-----------------------------------------------------------------------------------------------------------------
 #Gooey input
 #-----------------------------------------------------------------------------------------------------------------
 
 @Gooey(program_name="Make Contour", use_legacy_titles=True, required_cols=1, default_size=(1000,800))
 def param_parser():
+
+    
+    globalmapperversions = glob.glob('C:\\Program Files\\'+'GlobalMapper*')
+
+    if len(globalmapperversions) >= 2:
+        for vers in globalmapperversions:
+            if fnmatch.fnmatch(vers, '*GlobalMapper2*'):
+                globalmapperexe = '{0}\\global_mapper.exe'.format(vers)
+            elif fnmatch.fnmatch(vers, '*GlobalMapper18*'):
+                globalmapperexe = '{0}\\global_mapper.exe'.format(vers)
+        
+    else:  
+        globalmapperexe = '{0}\\global_mapper.exe'.format(globalmapperversions[0])
+
+
     parser=GooeyParser(description="Make Contour")
-    parser.add_argument("inputfolder", metavar="Contour Points Folder", widget="DirChooser", help="Select input files (.las/.laz)", default='')
-    parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns (*.laz or 123*_456*.laz;345*_789* )", default='*.laz')
-    parser.add_argument("layoutfile", metavar="TileLayout file", widget="FileChooser", help="TileLayout file(.json)", default='')
-    #parser.add_argument("hydrofiles", metavar="Hydro LAS files", widget="MultiFileChooser", help="Select Hydro files (las/laz )", default='')
-    parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
-    parser.add_argument("aoi", metavar="AOI", widget="FileChooser", help="Area of interest(.shp file)", default="")
-    parser.add_argument("contourinterval", metavar="Contour interval", help="Provide contour interval", default='0.5')
-    parser.add_argument("indexinterval", metavar="Index Interval", help="Provide interval for contour index", default='5')
-    parser.add_argument("zone", metavar="Zone", help="Provide Zone", default='')
-    parser.add_argument("gmexe", metavar="Global Mapper EXE", widget="FileChooser", help="Location of Global Mapper exe", default="C:\\Program Files\\GlobalMapper16.0_64bit_crack\\global_mapper.exe")
-    parser.add_argument("-b", "--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
-    parser.add_argument("-c", "--cores",metavar="Cores", help="No of cores to run", type=int, default=4)
+    sub_pars = parser.add_subparsers(help='commands', dest='command')
+    filter_parser = sub_pars.add_parser('Filter_LAZ_Files', help='Prepares the las files for contours by filtering')
+    filter_parser.add_argument("inputfolder", metavar="Input Folder", widget="DirChooser", help="Select input files (.las/.laz)", default='')
+    filter_parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file type", default='laz')
+    filter_parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
+    filter_parser.add_argument("TL", metavar="Tilelayout", widget="FileChooser", help="tilelayout.json", default="")
+    filter_parser.add_argument("contourinterval", metavar="Contour interval", help="Provide contour interval", default='0.5')
+    filter_parser.add_argument("filterval",metavar="Filter Value", help="Must not be more than 10% of contour interval", type=float, default=0.05)
+    filter_parser.add_argument("thinhz",metavar="horizontal", help="Thins data before processing", type=float, default=2.0)
+    filter_parser.add_argument("thinvt",metavar="vertical", help="Thins data before processing", type=float, default=0.1)
+    filter_parser.add_argument("-flatten", metavar="Flatten", help="Flatten points between intervals", action='store_true',default=False)
+    filter_parser.add_argument("-cores",metavar="Cores", help="No of cores to run", type=int, default=8)
+    main_parser = sub_pars.add_parser('Make_Contours', help='Creates the contours')
+    main_parser.add_argument("inputfolder", metavar="Contour Points Folder", widget="DirChooser", help="Select input files (.las/.laz)", default='')
+    main_parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file type", default='laz')
+    main_parser.add_argument("ilayoutfile", metavar="TileLayout file(all tiles)", widget="FileChooser", help="TileLayout file(.json)", default='')
+    main_parser.add_argument("olayoutfile", metavar="TileLayout file(output tiles)", widget="FileChooser", help="TileLayout file(.json)", default='')
+    main_parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
+    main_parser.add_argument("aoi", metavar="AOI/s", widget="MultiFileChooser", help="Area of interest(.shp file)", default="")
+    main_parser.add_argument("projection", metavar="Projection", choices=['AMG (Australian Map Grid)','MGA (Map Grid of Australia)'], default='MGA (Map Grid of Australia)')
+    main_parser.add_argument("datum", metavar="Datum",choices=['D_AUSTRALIAN_1984','D_AUSTRALIAN_1966','GDA94', 'GDA2020'], default='GDA94')
+    main_parser.add_argument("zone", metavar="UTM Zone", choices=['50','51','52','53','54','55','56'],default='55')
+    main_parser.add_argument("contourinterval", metavar="Contour interval", help="Provide contour interval", default='0.5')
+    main_parser.add_argument("indexinterval", metavar="Index Interval", help="Provide interval for contour index", default='5')
+    main_parser.add_argument("gmexe", metavar="Global Mapper EXE", widget="FileChooser", help="Location of Global Mapper exe", default=globalmapperexe)
+    main_parser.add_argument("-b", "--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
+    main_parser.add_argument("-k", "--kill",metavar="Kill Size", help="Provide Kill distance", type=int, default=800)
+    main_parser.add_argument("-c", "--cores",metavar="Cores", help="No of cores to run", type=int, default=8)
+    main_parser.add_argument("-hpfiles", "--hydropointsfiles", widget="MultiFileChooser", metavar = "Hydro Points Files", help="Select files with Hydro points")
 
     return parser.parse_args()
 
@@ -38,116 +73,124 @@ def param_parser():
 #Function definitions
 #-----------------------------------------------------------------------------------------------------------------
 
-def makegmsfiles(filename,inpath,outpath,buffoutpath,clipoutpath,tile,zone, AOI_clip, index):
 
-    template = "\\\\10.10.10.100\\projects\\PythonScripts\\templates\\Template.gms"
-    dstfile = os.path.join(outpath,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
-    outputpath = outpath+"\\"
-    buffout = buffoutpath+"\\"
-    inpath = inpath+"\\"
-    clipout = clipoutpath+"\\"
-    copyfile(template, dstfile)
-    log = ''
+def convert2TXT(inputlas,tilename,output):
+    log =''
 
     try:
-        with open(dstfile, 'r') as g:
-            data = g.read()
-
-            while '<Filename>' in data:
-                data = data.replace('<Filename>', filename)
-            while '<Outpath>' in data:
-                data = data.replace('<Outpath>', outpath)
-            while '<InPath>' in data:
-                data = data.replace('<InPath>', inpath)
-            while '<BuffOutpath>' in data:
-                data = data.replace('<BuffOutpath>', buffout)
-            while '<ClipOutpath>' in data:
-                data = data.replace('<ClipOutpath>', clipout)
-            while '<zone>' in data:
-                data = data.replace('<zone>', zone)
-            while '<AOI_clip>' in data:
-                data = data.replace('<AOI_clip>', AOI_clip)
-            while '<xmin>' in data:
-                data = data.replace('<xmin>', str(tile.xmin))
-            while '<ymin>' in data:
-                data = data.replace('<ymin>', str(tile.ymin))
-            while '<xmax>' in data:
-                data = data.replace('<xmax>', str(tile.xmax))
-            while '<ymax>' in data:
-                data = data.replace('<ymax>', str(tile.ymax))
-            while '<index>' in data:
-                data = data.replace('<index>', str(index))
-
-        with open(dstfile, 'w') as f:
-                f.write(data)
-        if os.path.exists(dstfile):
-            log = 'Successfully created GMS file for :{0}'.format(filename)
-            return(True,dstfile,log)
-        else:
-            log = 'Could not create GMS file for :{0}'.format(filename)
-            return(False,None,log)
-    except:
-        log = 'Could not create GMS file for :{0}, Failed at exception'.format(filename)
-        return(False,None,log)
-
-
-
-
-
-
-def rungmsfiles(gmpath, gmsfile):
-    log = ''
-
-    try:
-        subprocessargs=[gmpath, gmsfile]
+        subprocessargs=['C:/LAStools/bin/las2txt64.exe','-i',inputlas,'-keep_class',2,'-rescale',0.001,0.001,0.001,'-o',output]
         subprocessargs=list(map(str,subprocessargs))
-        print(subprocessargs)
-        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
-        log = 'Making Contours was successful for {0}'.format(gmsfile)
-        return (True,None, log)
-
-    except subprocess.CalledProcessError as suberror:
-        log=log +'\n'+ "{0}\n".format(suberror.stdout)
-        print(log)
-        return (True,None,log)
-
-    except:
-        log = 'Could not run GMS file for {0}, Failed at Subprocess'.format(gmsfile)  
-        return (False,None, log)
-
-
-def makecontours(neighbourfiles, output, tile, filename, buffer, contourinterval):
-    log = ''
-    #set up clipping
-    keep='-keep_xy {0} {1} {2} {3}'.format(tile.xmin-buffer, tile.ymin-buffer, tile.xmax+buffer, tile.ymax+buffer)
-    keep=keep.split()
-
-    try:
-        subprocessargs=['C:/LAStools/bin/blast2iso.exe','-i'] + neighbourfiles + ['-merged','-oshp', '-iso_every', contourinterval,'-clean',2,'-o',output] + keep 
-        subprocessargs=list(map(str,subprocessargs))
+        #print(list(subprocessargs))
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
 
-    except subprocess.CalledProcessError as suberror:
-        log=log +'\n'+ "{0}\n".format(suberror.stdout)
-        print(log)
-        return (False,None,log)
-
     except:
-        log = 'Could not make countours {0}, Failed at Subprocess'.format(filename)  
+        log = 'Could not make countours {0}, Failed at Subprocess'.format(tilename)  
         return (False,None, log)
 
     finally:
         if os.path.isfile(output):
-            log = 'Making Contours was successful for {0}'.format(filename)
+            log = 'Making Contours was successful for {0}'.format(tilename)
             return (True,output, log)
 
         else:
-            log = 'Could not make contours for {0}'.format(filename)   
+            log = 'Could not make contours for {0}'.format(tilename)   
+            return (False,None, log)
+
+def txt2las(input,tilename,output):
+    print(input)
+    log =''
+
+    try:
+        subprocessargs=['C:/LAStools/bin/las2las64.exe','-i',input,'-olaz','-o',output]
+        subprocessargs=list(map(str,subprocessargs))
+        #print(list(subprocessargs))
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+    except:
+        log = 'Could not make countours {0}, Failed at Subprocess'.format(tilename)  
+        return (False,None, log)
+
+    finally:
+        if os.path.isfile(output):
+            log = 'Making Contours was successful for {0}'.format(tilename)
+            return (True,output, log)
+
+        else:
+            log = 'Could not make contours for {0}'.format(tilename)   
+            return (False,None, log)
+
+def filterFile(tilename,input,output,interval,buff,flatten):
+    print(f'Filtering : {tilename}')
+    #myfile="W:/processing/test/756000_7462000.txt"  ## ground only laz converted to xyz - input
+    #myfile2="W:/processing/test/756000_7462000_filter_15cm.txt" #-output
+    #interval=0.5 #-contour_interval
+    #buff=0.15 #-filtervalue (must not be more than 30% of interval)
+    #flatten=True #-flatten user input to flatten points between intervals's
+
+    count=0 
+    with open(output,'w') as f:
+
+        lines = [line.rstrip('\n')for line in open(input)]
+        #print(len(lines))
+        for line in lines:
+            count=count+1
+            #if count%100000==0:
+                #print(count
+            x,y,z=line.split()
+            x,y,z=float(x),float(y),float(z)
+            b=z%interval
+            if buff<=b<=(interval-buff):
+                if flatten:
+                    z=math.floor(z/interval)*interval+interval/2
+
+                f.write('{0} {1} {2}\n'.format(x,y,z))
+        f.close()
+
+def thindata(tilename,inputfile,outputfile,hz,vt):
+    print(f'Thinning : {tilename}')
+    subprocessargs=['C:/LAStools/bin/lasthin64.exe','-i',inputfile,'-olaz','-o',outputfile,'-adaptive',vt,hz]
+    subprocessargs=subprocessargs
+    subprocessargs=list(map(str,subprocessargs))    
+    p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+
+def filterprocess(tilename,inputfolder,thinnedfolder,txtfolder,filteredfolder,lazfolder,contourinterval,filterval,flatten,filetype,hz,vt):
+
+    txtfile = os.path.join(txtfolder,'{0}.txt'.format(tilename))
+    inputfile = os.path.join(inputfolder,'{0}.{1}'.format(tilename,filetype))
+    thinnedfile = os.path.join(thinnedfolder,'{0}.laz'.format(tilename))
+    filteredtxtfile = os.path.join(filteredfolder,'{0}.txt'.format(tilename))
+    filteredlas = os.path.join(lazfolder,'{0}.laz'.format(tilename))
+    #cleanup=[]
+    cleanup = [txtfile,thinnedfile,filteredtxtfile]
+    try:
+        thindata(tilename,inputfile,thinnedfile,hz,vt)
+        convert2TXT(thinnedfile,tilename,txtfile)
+        filterFile(tilename,txtfile,filteredtxtfile,contourinterval,filterval,flatten)
+        txt2las(filteredtxtfile,tilename,filteredlas)
+
+    except:
+        log = 'Could not make countours {0}, Failed at Subprocess'.format(tilename)
+        return (False,None, log)
+
+    finally:
+        if os.path.isfile(filteredlas):
+            log = 'Making Contours was successful for {0}'.format(tilename)
+            for fe in cleanup:
+                try:
+                    if os.path.isfile(fe):
+                        os.remove(fe)   
+                except:
+                    print('cleanup FAILED.') 
+                print('Cleaning Process complete')
+            return (True,filteredlas, log)
+
+        else:
+            log = 'Could not make contours for {0}'.format(tilename)
             return (False,None, log)
 
 
 
-   
 #-----------------------------------------------------------------------------------------------------------------
 #Main entry point
 #-----------------------------------------------------------------------------------------------------------------
@@ -156,100 +199,162 @@ def main():
     #Set Arguments
     args = param_parser()
 
-    inputfolder=args.inputfolder
-    filepattern = args.filepattern.split(';')
+    if args.command == "Make_Contours":
+        inputfolder=args.inputfolder
+        filetype = args.filepattern
+        filepattern = ['*.{0}'.format(filetype)]
 
-    contourfiles = []
-    if len(filepattern) >=2:
-        print('Number of patterns found : {0}'.format(len(filepattern)))
-    for pattern in filepattern:
-        pattern = pattern.strip()
-        print ('Selecting files with pattern {0}'.format(pattern))
-        filelist = glob.glob(inputfolder+"\\"+pattern)
-        for file in filelist:
-            contourfiles.append(file)
-    print('Number of Files found : {0} '.format(len(contourfiles)))
+        contourfiles = []
+        if len(filepattern) >=2:
+            print('Number of patterns found : {0}'.format(len(filepattern)))
+        for pattern in filepattern:
+            pattern = pattern.strip()
+            print ('Selecting files with pattern {0}'.format(pattern))
+            filelist = glob.glob(inputfolder+"\\"+pattern)
+            for file in filelist:
+                contourfiles.append(file)
+        print('Number of Files found : {0} '.format(len(contourfiles)))
 
-    tilelayoutfile = args.layoutfile
-    outpath = args.outputpath
-    #hydrofiles = args.hydrofiles
-    aoi = args.aoi
-    zone = args.zone
-    gmexe = args.gmexe.replace('\\','/')
-    buffer = args.buffer
-    cores = args.cores
-    contourinterval = args.contourinterval
-    index = float(contourinterval)*(float(args.indexinterval))
+        itilelayoutfile = args.ilayoutfile
+        otilelayoutfile = args.olayoutfile
+        outpath = args.outputpath
+        #hydrofiles = args.hydrofiles
+        aois = args.aoi.split(';')
+        print(aois)
+        zone = args.zone
+        projection = args.projection
+        print("Zone number : {0}".format(zone))
+        gmexe = args.gmexe.replace('\\','/')
+        buffer = args.buffer
+        kill = args.kill
+        cores = args.cores
+        contourinterval = args.contourinterval
+        index = float(contourinterval)*(float(args.indexinterval))
+        hydropointsfiles=None
+        if not args.hydropointsfiles==None:
+            hydropointsfiles=args.hydropointsfiles.replace('\\','/')
 
-    al = Atlasslogger(outpath)
+        print(hydropointsfiles)
+        scriptpath = os.path.dirname(os.path.realpath(__file__))
+        print(scriptpath)
 
-    tilelayout = AtlassTileLayout()
-    tilelayout.fromjson(tilelayoutfile)
+        otilelayout = AtlassTileLayout()
+        otilelayout.fromjson(otilelayoutfile)
 
-    if not contourfiles:
-        al.PrintMsg ("Please select the correct file type", "No Selected files")
-        quit
+        if not contourfiles:
+            print("No LAS files in the given folder to generate contours")
+            quit
 
-    dt = strftime("%y%m%d_%H%M")
+        dt = strftime("%y%m%d_%H%M")
 
-    contour_buffered_out_path = AtlassGen.makedir(os.path.join(outpath, (dt+'_makeContour')))
-    gms_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'scripts'))
-    bufferedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, ('buffered_{0}m_contours'.format(buffer))))
-    bufferremoved_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'buffer_removed'))
-    clippedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'clipped'))
+        if args.datum == 'D_AUSTRALIAN_1984':
+            proj_name = "AMG_ZONE{0}_AUSTRALIAN_GEODETIC_1984".format(zone)
+            epsg = 20300 + int(zone)
+            prjfile = "{1}\\EPSG\\{0}.prj".format(epsg,scriptpath)
+            if not os.path.isfile(prjfile):
+                prjfile = None
+                print("PRJ file could not be found for EPSG : {0}".format(epsg))
 
-    #Make Contour Files
-    mk_contour_tasks = {}
-    for contourfile in contourfiles:
-        path, filename, ext = AtlassGen.FILESPEC(contourfile)
-        x,y=filename.split('_')
-        tile = tilelayout.gettile(filename)
-        #file
-        output = os.path.join(bufferedout_path,'{0}.{1}'.format(tile.name,'shp')).replace('\\','/')
-        neighbourfiles = []
-        neighbours = tile.getneighbours(buffer)
-        for neighbour in neighbours:
-            neighbourfiles.append(os.path.join(path,'{0}.{1}'.format(neighbour,ext)).replace('\\','/'))
+        if args.datum == 'D_AUSTRALIAN_1966':
+            proj_name = "AMG_ZONE{0}_AUSTRALIAN_GEODETIC_1966".format(zone)
+            epsg = 20200 + int(zone)
+            prjfile = "{1}\\EPSG\\{0}.prj".format(epsg,scriptpath)
+            if not os.path.isfile(prjfile):
+                prjfile = None
+                print("PRJ file could not be found for EPSG : {0}".format(epsg))
 
-        mk_contour_tasks[filename] = AtlassTask(filename, makecontours, neighbourfiles, output, tile, filename, int(buffer), contourinterval)        
+        if args.datum == 'GDA94':
+            proj_name = "MGA_ZONE{0}_GDA_94_AUSTRALIAN_GEODETIC_1994".format(zone)
+            epsg = 28300 + int(zone)
+            prjfile = "{1}\\EPSG\\{0}.prj".format(epsg,scriptpath)
+            if not os.path.isfile(prjfile):
+                prjfile = None
+                print("PRJ file could not be found for EPSG : {0}".format(epsg))
+
+
+        if args.datum == 'GDA2020':
+            proj_name = "MGA_ZONE{0}_GDA_2020_AUSTRALIAN_GEODETIC_2020".format(zone)
+            epsg = 7800 + int(zone)
+            prjfile = "{1}\\EPSG\\{0}.prj".format(epsg,scriptpath)
+            if not os.path.isfile(prjfile):
+                prjfile = None
+                print("PRJ file could not be found for EPSG : {0}".format(epsg))
+
+        contour_buffered_out_path = AtlassGen.makedir(os.path.join(outpath, ('{0}_makeContour_{1}'.format(dt,contourinterval))))
+        gms_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'scripts'))
+        bufferedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, ('buffered_{0}m_contours'.format(buffer))))
+        bufferremoved_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'buffer_removed'))
+        clippedout_path = AtlassGen.makedir(os.path.join(contour_buffered_out_path, 'clipped_shp'))
+
+        if not epsg == None:
+
+            prjfile2 = "{1}\\EPSG\\{0}.prj".format(epsg,scriptpath)
+            prjfile = os.path.join(gms_path,'{0}.prj'.format(epsg)).replace('\\','/')
+
+        if os.path.isfile(prjfile2):
+            shutil.copy(prjfile2,prjfile)
+        else:
+            print("PRJ file for {1} is not available in {0}".format(scriptpath,epsg))
+
+        mk_contour_tasks = {}
+        for tile in otilelayout:
+                                                                                                 
+            mk_contour_tasks[tile.name] = AtlassTask(tile.name,ContourClass.makecontourprocess, tile.name,inputfolder,gms_path,bufferedout_path,bufferremoved_path,clippedout_path,int(buffer),contourinterval,zone,aois,index,hydropointsfiles,gmexe,itilelayoutfile,otilelayoutfile,prjfile,proj_name,args.datum,projection,kill)        
+
+        p=Pool(processes=cores)      
+        mk_contour_results=p.map(AtlassTaskRunner.taskmanager,mk_contour_tasks.values())
+
+
+        #Verify final results
+        for result in mk_contour_results:
+            print(result.result, result.log)
         
-    p=Pool(processes=cores)      
-    mk_contour_results=p.map(AtlassTaskRunner.taskmanager,mk_contour_tasks.values())
+    if args.command == "Filter_LAZ_Files":
 
 
-    #Make GMS files
-    mk_gmsfiles_tasks = {}
-    for result in mk_contour_results:
-        print(result.success, result.log)
-        if result.success:
-            path, filename, ext = AtlassGen.FILESPEC(result.result)
-            x,y=filename.split('_')
-            tile = tilelayout.gettile(filename)
-       
-            mk_gmsfiles_tasks[filename] = AtlassTask(filename, makegmsfiles,filename,bufferedout_path,gms_path,bufferremoved_path,clippedout_path,tile, zone, aoi, index)
+        inputfolder = args.inputfolder
+        outputfolder = args.outputpath
+        contourinterval = float(args.contourinterval)
+        filetype = args.filepattern
+        filepattern = ['*.{0}'.format(filetype)]
+        filterval = float(args.filterval)
+        flatten = args.flatten
+        tilelayoutfile = args.TL
+        cores = args.cores
+        hz = args.thinhz
+        vt = args.thinvt
+
+
+        files=AtlassGen.FILELIST(filepattern, inputfolder)
+        print("\nNo of laz files found : {0}".format(len(files)))
+
+        filterval_val = min([filterval,0.3])
+
+        print("\nFiltering Value used : {0}".format(filterval_val))
+
+        outputfolder = AtlassGen.makedir(os.path.join(outputfolder,'Filteringfor_{0}m_Contours_{1}_filtering'.format(contourinterval,filterval_val)).replace('\\','/'))
+        txtfolder = AtlassGen.makedir(os.path.join(outputfolder,'txt_files').replace('\\','/'))
+        thinnedfolder = AtlassGen.makedir(os.path.join(outputfolder,'thinned_files').replace('\\','/'))
+        filteredfolder = AtlassGen.makedir(os.path.join(txtfolder,'filtered_txtfiles').replace('\\','/'))
+        lazfolder = AtlassGen.makedir(os.path.join(outputfolder,'filtered_laz').replace('\\','/'))
+
         
+        tl_out = AtlassTileLayout()
+        tl_out.fromjson(tilelayoutfile)
+
+        filter_task = {}
+        filter_results = []
+
+        for tile in tl_out:
+
+            tilename = tile.name
+            filter_task[tilename] = AtlassTask(tilename, filterprocess, tilename,inputfolder,thinnedfolder,txtfolder,filteredfolder,lazfolder,contourinterval,filterval_val,flatten,filetype,hz,vt)     
+
+        p=Pool(processes=cores)      
+        filter_results=p.map(AtlassTaskRunner.taskmanager,filter_task.values())
         
-    mk_gmsfiles_results=p.map(AtlassTaskRunner.taskmanager,mk_gmsfiles_tasks.values())
-
-
-    #Run GMS files
-    run_gmsfiles_tasks = {}
-    for result in mk_gmsfiles_results:
-        print(result.success, result.log)
-        if result.success:
-                
-            path, filename, ext = AtlassGen.FILESPEC(result.result)
-            #files
-            gmscript = os.path.join(gms_path,'{0}.{1}'.format(filename,'gms')).replace('\\','/')
-
-            run_gmsfiles_tasks[filename] = AtlassTask(filename, rungmsfiles, gmexe, gmscript)
-
-    run_gmsfiles_results=p.map(AtlassTaskRunner.taskmanager,run_gmsfiles_tasks.values())
-
-    #Verify final results
-    for result in run_gmsfiles_results:
-        print(result.result, result.log)
-    
+        for result in filter_results:
+            print(result.log)
     return
 
 if __name__ == "__main__":

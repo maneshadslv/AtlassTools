@@ -1,0 +1,8 @@
+Make a list of SA_out files using command 
+Y:\BR03080_Western_Woodlands-Landgate\01_LiDAR\02_SA_out>dir *.laz /A /B /S > list.csv
+Add coulumns for basename, psid,zone
+
+outputpath=F:\test
+wdppath=F:\test
+
+python D:\AtlassTools\WesternWoodlands_WDP_Renamer.py #lasfiles# #wdppath# #outputpath# #base# #psid# #zone#

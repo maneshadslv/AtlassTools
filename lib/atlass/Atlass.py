@@ -376,7 +376,14 @@ class AtlassTileLayout():
         else:
             raise TypeError('only accepts strings as tilename')  
       
-
+    def gettilesfrombounds(self,xmax,xmin,ymax,ymin):
+		neighbours=[]
+		for key,tile in self.tiles():
+			if tile.xmin<xmin<tile.xmax or tile.xmin<xmax<tile.xmax or xmin<tile.xmin<xmax or xmin<tile.xmax<xmax:
+				if tile.ymin<ymin<tile.ymax or tile.ymin<ymax<tile.ymax or ymin<tile.ymin<ymax or ymin<tile.ymax<ymax:
+					neighbours.append(tile.name)
+		return neighbours
+		
     def fromdict(self,data):    
        for key, value in data.items():
             if not key in self.tiles:

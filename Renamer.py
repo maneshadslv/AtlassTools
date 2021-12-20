@@ -4,7 +4,7 @@
 import sys
 import os
 sys.path.append('{0}/lib/atlass/'.format(sys.path[0]))
-from Atlass import *
+from Atlass_beta1 import *
 from gooey import Gooey, GooeyParser
 
 #-----------------------------------------------------------------------------------------------------------------

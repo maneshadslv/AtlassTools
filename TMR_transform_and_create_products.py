@@ -15,8 +15,8 @@ from time import strftime
 from multiprocessing import Pool,freeze_support
 sys.path.append('{0}/lib/atlass/'.format(sys.path[0]).replace('\\','/'))
 from Atlass_beta1 import *
-sys.path.append('{0}/lib/shapefile/'.format(sys.path[0]).replace('\\','/'))
-import shapefile
+sys.path.append('{0}/lib/shapefile_original.'.format(sys.path[0]).replace('\\','/'))
+import shapefile_original.original
 
 #-----------------------------------------------------------------------------------------------------------------
 #Gooey input
@@ -29,9 +29,10 @@ def param_parser():
     main_parser.add_argument("outputpath", metavar="Output Folder", widget="DirChooser", help="Select output folder", default="")
     main_parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns \nex: (*.laz) or (123*_456*.laz; 345*_789*.laz )", default='*.laz')
     main_parser.add_argument("geojsonfile", metavar="TileLayout file", widget="FileChooser", help="Select TileLayout file (.json)", default='')
-    main_parser.add_argument("poly", metavar="AOI file", widget="FileChooser", help="polygon shapefile (.shp)", default='')
+    main_parser.add_argument("poly", metavar="AOI file", widget="FileChooser", help="polygon shapefile_original.(.shp)", default='')
     main_parser.add_argument('name', metavar="AreaName", help="Project Area Name eg : MR101502 ", default="")
     main_parser.add_argument("epsg", metavar="EPSG", type=int)
+    main_parser.add_argument("year", metavar="Year Flown", type=int)
     main_parser.add_argument("dx", metavar="dx", type=float)
     main_parser.add_argument("dy", metavar="dy", type=float)
     main_parser.add_argument("dz", metavar="dz", type=float)
@@ -43,7 +44,7 @@ def param_parser():
     main_parser.add_argument("-b", "--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
     main_parser.add_argument("-hpfiles", "--hydropointsfiles", widget="MultiFileChooser", metavar = "Hydro Points Files", help="Select files with Hydro points")
     main_parser.add_argument("-k", "--kill",metavar="Kill", help="Large triangle size (m)", type=int, default=250)
-    main_parser.add_argument("-co", "--cores",metavar="Cores", help="No of cores to run in", type=int, default=4)
+    main_parser.add_argument("-co", "--cores",metavar="Cores", help="No of cores to run in", type=int, default=8)
     
     return main_parser.parse_args()
 
@@ -359,7 +360,7 @@ def lastoasciigrid(x,y,input, output, tilesize, step):
 
 def clipandmergelas(filelist,clipshape,lasfile,outformat='las'):
     '''
-    clips and merges several lasfiles usinf an ESRI shapefile.
+    clips and merges several lasfiles usinf an ESRI shapefile_original.
     '''
     try:
         subprocessargs=['C:/LAStools/bin/clip.exe','-i'] +filelist + ['-o{0}'.format(outformat),'-merged', '-o', lasfile, '-poly',clipshape] 
@@ -375,7 +376,7 @@ def clipandmergelas(filelist,clipshape,lasfile,outformat='las'):
 
 def transformlas(infile,outfile,x=0,y=0,z=0,outformat='las'):
     #
-    #clips and merges several lasfiles usinf an ESRI shapefile.
+    #clips and merges several lasfiles usinf an ESRI shapefile_original.
     #
 
     try:
@@ -535,7 +536,7 @@ def buffertiles(input, bufffile, filetype, buffer, tile):
     if isinstance(input,str):
         input = [input]
     try:
-
+        print('input_tiles',input)
         #not changing the classifciation, just creating a buffered unfiltered temp file.
         subprocessargs=['C:/LAStools/bin/las2las.exe','-i']+input+['-merged','-o{0}'.format(filetype),'-o',bufffile]
         subprocessargs=subprocessargs+['-keep_xy',tile.xmin-buffer,tile.ymin-buffer,tile.xmax+buffer,tile.ymax+buffer]
@@ -566,7 +567,7 @@ def makeMKP(bufffile, tempfile, output, filetype, gndclasses, hz, vt, buffer, xm
 
     try:
 
-        subprocessargs=['C:/LAStools/bin/lasthin.exe','-i',bufffile,'-o{0}'.format(filetype),'-o',tempfile,'-adaptive',vt,hz,'-classify_as',8,'-ignore_class'] + [0,1,3,4,5,6,7,9,10,11,12,13,14,15,16,17,18,19,20]
+        subprocessargs=['C:/LAStools/bin/lasthin64.exe','-i',bufffile,'-o{0}'.format(filetype),'-o',tempfile,'-adaptive',vt,hz,'-classify_as',8,'-ignore_class'] + [0,1,3,4,5,6,7,9,10,11,12,13,14,15,16,17,18,19,20]
         subprocessargs=list(map(str,subprocessargs))    
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
 
@@ -688,7 +689,7 @@ def main():
     geojsonfile = args.geojsonfile.replace('\\','/')
     intensityMin = args.intensity_min
     intensityMax = args.intensity_max
-    
+    year = args.year
 
     if not args.hydropointsfiles==None:
         hydropointsfiles=args.hydropointsfiles
@@ -740,8 +741,6 @@ def main():
         path, filename, ext = AtlassGen.FILESPEC(file)
         x,y=filename.split('_')
         #finalnames[filename]={}
-        #finalnames[filename]['CLIPPED_LAS']='{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.las'.format()
-        #finalnames[filename]['ESRI_GRID']='{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.las'.format()
         
         output = os.path.join(adjdir, '{0}.{1}'.format(filename, ext)).replace("\\", "/")
      
@@ -789,7 +788,7 @@ def main():
                 if os.path.isfile(neighbour):
                     neighbourlasfiles.append(neighbour)
 
-            buffer_tasks[tilename] = AtlassTask(tilename, buffertiles, input, bufferedfile, filetype, buffer, tile)
+            buffer_tasks[tilename] = AtlassTask(tilename, buffertiles, neighbourlasfiles, bufferedfile, filetype, buffer, tile)
   
 
     buffer_results=p.map(AtlassTaskRunner.taskmanager,buffer_tasks.values())
@@ -855,7 +854,7 @@ def main():
             x,y = tilename.split('_')
             #files 
             input = os.path.join(mkpdir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/') # mkp
-            output = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, 'las')).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
+            output = os.path.join(lasahddir, '{0}_{5}_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, 'las',year)).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
          
 
             clip_mkp_tasks[tilename] = AtlassTask(tilename, clip, input, output, poly, 'las')
@@ -974,7 +973,7 @@ def main():
 
             #files
             input=os.path.join(adjdemworkingdir,'{0}_dem_clipped.{1}'.format(tilename, filetype)).replace('\\','/')
-            output=os.path.join(dem1esridir,'{0}_2018_SW_{1}_{2}_1k_1m_esri.asc'.format(areaname, x, y)).replace('\\','/')
+            output=os.path.join(dem1esridir,'{0}_{3}_SW_{1}_{2}_1k_1m_esri.asc'.format(areaname, x, y, year)).replace('\\','/')
 
             lastoasciigrid_tasks[tilename] = AtlassTask(tilename, lastoasciigrid,int(x), int(y), input, output, int(tilesize), step)
     
@@ -987,7 +986,7 @@ def main():
     #Download prj file for the requied zone
 
     link = "http://spatialreference.org/ref/epsg/gda94-mga-zone-{0}/prj/".format(zone)
-    projfile = os.path.join(prodsdir, '{0}_tile_layout_shapefile.prj'.format(areaname)).replace("\\", "/")
+    projfile = os.path.join(prodsdir, '{0}_tile_layout_shapefile_original.prj'.format(areaname)).replace("\\", "/")
     prjfile = urllib.request.urlretrieve(link, projfile)
     
 
@@ -1005,10 +1004,10 @@ def main():
             x,y=tilename.split('_') 
 
             #files 
-            input=os.path.join(dem1esridir,'{0}_2018_SW_{1}_{2}_1k_1m_esri.asc'.format(areaname, x, y)).replace('\\','/') #dtm asci file
-            prjfile1 = os.path.join(dem1esridir,'{0}_2018_SW_{1}_{2}_1k_1m_esri.prj'.format(areaname, x, y)).replace('\\','/')
+            input=os.path.join(dem1esridir,'{0}_{3}_SW_{1}_{2}_1k_1m_esri.asc'.format(areaname, x, y, year)).replace('\\','/') #dtm asci file
+            prjfile1 = os.path.join(dem1esridir,'{0}_{3}_SW_{1}_{2}_1k_1m_esri.prj'.format(areaname, x, y, year)).replace('\\','/')
             shutil.copyfile(projfile, prjfile1) 
-            output = os.path.join(dem1dir,'{0}_2018_SW_{1}_{2}_1k_1m.xyz'.format(areaname, x, y)).replace('\\','/')
+            output = os.path.join(dem1dir,'{0}_{3}_SW_{1}_{2}_1k_1m.xyz'.format(areaname, x, y, year)).replace('\\','/')
 
             xyz_tasks[tilename] = AtlassTask(tilename, makeXYZ, input, output, filetype)
 
@@ -1033,8 +1032,8 @@ def main():
             x,y=tilename.split('_') 
 
             #files 
-            input = os.path.join(lasahddir, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, 'las')).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
-            output = os.path.join(intensitydir,'{0}_2018_SW_{1}_{2}_1k_50cm_INT.tif'.format(areaname, x, y)).replace("\\", "/")   #<inputpath>/Products/<Area_Name>_Intensity_50cm/<Name>_2018_SW_<X>_<Y>_1k_50cm_INT.tif
+            input = os.path.join(lasahddir, '{0}_{5}_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, 'las', year)).replace("\\", "/") #<inputpath>/Products/<Area_Name>_LAS_AHD/<Name>_2018_2_AHD_SW_<X>m_<Y>m_<Zone>_1k.las
+            output = os.path.join(intensitydir,'{0}_{3}_SW_{1}_{2}_1k_50cm_INT.tif'.format(areaname, x, y, year)).replace("\\", "/")   #<inputpath>/Products/<Area_Name>_Intensity_50cm/<Name>_2018_SW_<X>_<Y>_1k_50cm_INT.tif
 
             grid_tasks[tilename] = AtlassTask(tilename, makegrid, input, output, intensityMin,intensityMax, int(x), int(y))
 
@@ -1067,7 +1066,7 @@ def main():
     if not os.path.exists(prjfilespec[0]):
         os.makedirs(prjfilespec[0])
     
-    w = shapefile.Writer(shapefile.POLYGON)
+    w = shapefile_original.Writer(shapefile_original.POLYGON)
     w.autoBalance = 1
     w.field('TILE_NAME','C','255')
     w.field('XMIN','N',12,3)
@@ -1123,7 +1122,7 @@ def main():
         w.line(parts=[[boxcoords[0],boxcoords[1],boxcoords[2],boxcoords[3],boxcoords[4]]])
         w.record(TILE_NAME='{0}'.format(tilename), XMIN='{0}'.format(boxcoords[0][0]),YMIN='{0}'.format(boxcoords[0][1]),XMAX='{0}'.format(boxcoords[2][0]),YMAX='{0}'.format(boxcoords[2][1]),TILENUM='{0}_{1}'.format(x,y))
     
-    w.save(prjfile.replace('.prj','_shapefile'))           
+    w.save(prjfile.replace('.prj','_shapefile_original.))           
     print("Making shp file : Completed\n")
     
 

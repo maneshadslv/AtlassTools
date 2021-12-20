@@ -11,9 +11,10 @@ def param_parser():
     parser=GooeyParser(description="TMR renamer")
     parser.add_argument("input_folder", metavar="Input Directory ", widget="DirChooser", help="Select folder with input files")
     parser.add_argument("output_dir", metavar="Output Directory", widget="DirChooser", help="Output directory")
-    parser.add_argument("file_type",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='las')
+    parser.add_argument("file_type",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
     parser.add_argument('name', metavar="AreaName", help="Project Area Name eg : MR101502 ", default="")
     parser.add_argument("zone", metavar="zone", type=int)
+    parser.add_argument("year", metavar="year", type=int)
     parser.add_argument("-co", "--cores",metavar="Cores", help="No of cores to run in", type=int, default=4)
 
     return parser.parse_args()
@@ -49,6 +50,7 @@ def main():
     areaname = args.name
     zone = args.zone
     cores = args.cores
+    year = args.year
 
     lasfilepattern = '*.{0}'.format(filetype)
     lasfilepattern = lasfilepattern.split(';')
@@ -62,7 +64,7 @@ def main():
         path, filename , ext = AtlassGen.FILESPEC(file)
         x, y = filename.split('_')
         input = file
-        output =  os.path.join(outputfolder, '{0}_2018_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, filetype)).replace("\\", "/")
+        output =  os.path.join(outputfolder, '{0}_{5}_2_AHD_SW_{1}m_{2}m_{3}_1k.{4}'.format(areaname, x, y, zone, filetype, year)).replace("\\", "/")
         
         copy_tasks[filename] = AtlassTask(filename, copyfile, input, output)
 

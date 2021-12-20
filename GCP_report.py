@@ -20,7 +20,7 @@ import datetime
 from time import strftime
 from multiprocessing import Pool,freeze_support
 import pandas as pd
-sys.path.append('C:/Program Files/GTK2-Runtime Win64/bin')
+sys.path.append('C:/Program Files/GTK3-Runtime Win64/bin/'.replace('\\', '/'))
 from weasyprint import HTML
 from jinja2 import Environment, FileSystemLoader
 
@@ -34,10 +34,6 @@ from Atlass_beta1 import *
 #-----------------------------------------------------------------------------------------------------------------
 #Development Notes
 #-----------------------------------------------------------------------------------------------------------------
-# 01/10/2016 -Alex Rixon - Added functionality to create hydro flattening points. 
-# 01/10/2016 -Alex Rixon - Added functionality to create CHM  
-# 30/09/2016 -Alex Rixon - Added functionality to create DHM 
-# 20/09/2016 -Alex Rixon - Original development Alex Rixon
 #
 
 
@@ -47,75 +43,262 @@ from Atlass_beta1 import *
 #
 #-----------------------------------------------------------------------------------------------------------------
 #Global variables and constants
-__keepfiles=None #can be overritten by settings
-
 
 #-----------------------------------------------------------------------------------------------------------------
 #Gooey input
 #-----------------------------------------------------------------------------------------------------------------
 
-@Gooey(program_name="Generate GCP report", advanced=True, default_size=(1100,950), use_legacy_titles=True, required_cols=1, optional_cols=3)
+@Gooey(program_name="Generate GCP report", advanced=True, default_size=(1100,1000), use_legacy_titles=True, required_cols=2, optional_cols=3)
 def param_parser():
-    main_parser=GooeyParser(description="Generate GCP report")
-    main_parser.add_argument("inputfolder", metavar="Input Folder", widget="DirChooser", help="Select input las/laz folder", default="")
-    main_parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns \nex: (*.laz) or (123*_456*.laz; 345*_789*.laz )", default='*.laz')
-    main_parser.add_argument("tilelayoutfile", metavar="TileLayout file", widget="FileChooser", help="Select TileLayout file (.json)", default='')
-    main_parser.add_argument("control", metavar="Control file", widget="FileChooser", help="Select the GCP height control file")
-    main_parser.add_argument("projname", metavar="Project Name", default='')
-    main_parser.add_argument('areaname', metavar="Area Name", default='')
-    main_parser.add_argument('deltax', metavar="x shift", default=0, type=float)
-    main_parser.add_argument('deltay', metavar="y shift", default=0, type=float)
-    main_parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz'], default='laz')
-    main_parser.add_argument("-b", "--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
-    main_parser.add_argument("armse", metavar="Standard Deviation for filtering", help="The report status will be Not Accepted if value greater than the value provided", type=float)
-    main_parser.add_argument("--hasindex", metavar="Has Index?", action= "store_true")
-    main_parser.add_argument("--classify", metavar="Ground Classify", action= "store_true")
-    main_parser.add_argument("--gndclass", metavar="Ground Classes", default='2 8')
-    gnd_group = main_parser.add_argument_group("Ground Settings", gooey_options={'show_border': True,'columns': 5})
-    gnd_group.add_argument("--gndstep", metavar="Step", default=10, type=float)
-    gnd_group.add_argument("--spike", metavar="Spike", default=0.5, type=float)
-    gnd_group.add_argument("--downspike", metavar="Down Spike", default=1, type=float)
-    gnd_group.add_argument("--bulge", metavar="Bulge", default=2.5, type=float)
-    gnd_group.add_argument("--offset", metavar="Offset", default=1.0, type=float)
-    noise_group = main_parser.add_argument_group("Noise Settings", gooey_options={'show_border': True,'columns': 2})
-    noise_group.add_argument("--noisestep", metavar="Step",default=3.0, type=float)
-    noise_group.add_argument("--isopoints", metavar="Isolated points", default=10, type=int)
-    cores_group = main_parser.add_argument_group("Cores Settings", gooey_options={'show_border': True,'columns': 3} )
-    cores_group.add_argument("--noisecores", metavar="Classification", help="Number of Cores to be used for Classification process", type=int, default=4, gooey_options={
-        'validator': {
-            'test': '2 <= int(user_input) <= 14',
-            'message': 'Must be between 2 and 14'
-        }})
-    cores_group.add_argument("--cores", metavar="General", help="Number of cores to be used for tiling process", type=int, default=4, gooey_options={
-            'validator': {
-                'test': '2 <= int(user_input) <= 14',
-                'message': 'Must be between 2 and 14'
-            }})
+    main_parser=GooeyParser(description="\n\nTIN_method -  Use Point to Tin method (Must have ground classfication done before running this method)\nPatch_Stat_method -  Use Statistical/average elevation Method")
+    sub_pars = main_parser.add_subparsers(help='commands', dest='command')
+    tin_parser = sub_pars.add_parser('TIN_method', help='Use Point to Tin method (Must have ground classfication done before running this method)')
+    tin_parser.add_argument("inputfolder", metavar="Input Folder", widget="DirChooser", help="Select input las/laz folder", default="")
+    tin_parser.add_argument("-genreport", metavar="Generate Only Report", help=" **You can select this if you allready have the 'CGP_<tilename>_result.txt' files generated", action="store_true")
+    tin_parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns \nex: (*.laz) or (123*_456*.laz; 345*_789*.laz )", default='*.laz')
+    tin_parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz', 'txt','asc'], default='laz') 
+    tin_parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
+    tin_parser.add_argument("tilelayoutfile", metavar="TileLayout file", widget="FileChooser", help="Select TileLayout file (.json)", default='')
+    tin_parser.add_argument("--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
+    tin_parser.add_argument("control", metavar="Control file", widget="FileChooser", help="Select the GCP height control file")
+    name_group = tin_parser.add_argument_group("File name settings", "Required when files have different naming conventions", gooey_options={'show_border': True,'columns': 3})
+    name_group.add_argument("-hfn", "--hasfilename", metavar="Has filename pattern", action='store_true', default=False)
+    name_group.add_argument("-addzero", metavar="Zeros to add", help="Number of zeros to add at the end of X and Y\n1 = None, 100 = 2 zeros , etc..", type=int)
+    name_group.add_argument("--namepattern", metavar="Input File Name Convention", help="Ex: MGA55_dem_Mo%X%_%Y%_1.laz\n ")
+    tin_parser.add_argument("projname", metavar="Project Name", default='')
+    tin_parser.add_argument('areaname', metavar="Area Name", default='')
+    tin_parser.add_argument('deltax', metavar="x shift", default=0, type=float)
+    tin_parser.add_argument('deltay', metavar="y shift", default=0, type=float)
+    tin_parser.add_argument("armse", metavar="Standard Deviation for filtering", help="The report status will be Not Accepted if value greater than the value provided", type=float)
+    tin_parser.add_argument("--hasindex", metavar="GCP Control file Has Index?", action= "store_true")
+    tin_parser.add_argument("gndclass", metavar="Ground Classes", default='2 8')
+    tin_parser.add_argument("--cores", metavar="General", help="Number of cores to be used", type=int, default=8)
+
+    patchstat_parser = sub_pars.add_parser('Patch_Stat_method', help='Use Point to Tin method (Must have ground classfication done before running this method)')
+    patchstat_parser.add_argument("inputfolder", metavar="Input Folder", widget="DirChooser", help="Select input las/laz folder", default="")
+    patchstat_parser.add_argument("-genreport", metavar="Generate Only Report", help=" **You can select this if you allready have the 'CGP_<tilename>_result.txt' files generated", action="store_true")
+    patchstat_parser.add_argument("filepattern",metavar="Input File Pattern", help="Provide a file pattern seperated by ';' for multiple patterns \nex: (*.laz) or (123*_456*.laz; 345*_789*.laz )", default='*.laz')
+    patchstat_parser.add_argument("filetype",metavar="Input File Type", help="Select input file type", choices=['las', 'laz', 'txt'], default='laz') 
+    patchstat_parser.add_argument("outputpath", metavar="Output Directory",widget="DirChooser", help="Output directory", default='')
+    patchstat_parser.add_argument("tilelayoutfile", metavar="TileLayout file", widget="FileChooser", help="Select TileLayout file (.json)", default='')
+    patchstat_parser.add_argument("--buffer",metavar="Buffer", help="Provide buffer", type=int, default=200)
+    patchstat_parser.add_argument("control", metavar="Control file", widget="FileChooser", help="Select the GCP height control file")
+    name_group = patchstat_parser.add_argument_group("File name settings", "Required when files have different naming conventions", gooey_options={'show_border': True,'columns': 3})
+    name_group.add_argument("-hfn", "--hasfilename", metavar="Has filename pattern", action='store_true', default=False)
+    name_group.add_argument("-addzero", metavar="Zeros to add", help="Number of zeros to add at the end of X and Y\n1 = None, 100 = 2 zeros , etc..", type=int)
+    name_group.add_argument("--namepattern", metavar="Input File Name Convention", help="Ex: MGA55_dem_Mo%X%_%Y%_1.laz\n ")
+    patchstat_parser.add_argument("projname", metavar="Project Name", default='')
+    patchstat_parser.add_argument('areaname', metavar="Area Name", default='')
+    patchstat_parser.add_argument('deltax', metavar="x shift", default=0, type=float)
+    patchstat_parser.add_argument('deltay', metavar="y shift", default=0, type=float)
+    patchstat_parser.add_argument("armse", metavar="Standard Deviation for filtering", help="The report status will be Not Accepted if value greater than the value provided", type=float)
+    patchstat_parser.add_argument("radius", metavar="Radius for Surface avarage", default=2.0, type=float)
+    patchstat_parser.add_argument("--hasindex", metavar="GCP Control file Has Index?", action= "store_true")
+    patchstat_parser.add_argument("gndclass", metavar="Ground Classes", default='2 8')
+    patchstat_parser.add_argument("--cores", metavar="General", help="Number of cores to be used", type=int, default=8)
+
     return main_parser.parse_args()
+
 #-----------------------------------------------------------------------------------------------------------------
 #Function definitions
 #-----------------------------------------------------------------------------------------------------------------
 
-def CGPCheck(tilelayout,buffer,laspath, outpath, filetype,tile,points,gndclasses):
+def GenSurfaceStats(tilelayout,buffer,laspath, outpath, filetype,tile,points,radius,pointstatdir,user_std,namepattern):
+    log = ''
+    tile = tilelayout.gettile(tile)
+    outfile=os.path.join(outpath,'CGP_{0}_result.txt'.format(tile.name)).replace('\\','/')
+    outsqfile=os.path.join(pointstatdir,'CGP_{0}_sq.laz'.format(tile.name)).replace('\\','/')
+    neighbourlasfiles = []
+    tiledir = AtlassGen.makedir(os.path.join(pointstatdir, tile.name))
+    outputfiles = []
+    otf = open(outfile, 'w')
+    print(tile.name)
+
+    try:
+        if not buffer ==0:  
+            try:
+                neighbours = tile.getneighbours(buffer)
+                print(neighbours)
+            except:
+                print("tile: {0} does not exist in Tilelayout file".format(tile.name))
+            for neighbour in neighbours:
+                if namepattern == '':
+                    neighbour = os.path.join(laspath,'{0}.{1}'.format(neighbour, filetype)).replace('\\','/')
+                else:
+                    x,y = neighbour.split("_")
+                    filename = namepattern.replace("%X%",x)
+                    filename = filename.replace("%Y%",y)
+                    neighbour = os.path.join(laspath,filename)
+
+                if os.path.isfile(neighbour):
+                    neighbourlasfiles.append(neighbour) 
+                    subprocessargs=['C:/LAStools/bin/lasindex.exe','-i', neighbour, '-cores', 5]
+                    subprocessargs=list(map(str,subprocessargs)) 
+                    p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+            
+                #print("Indexing finished")
+        else:
+            neighbourlasfiles = [os.path.join(laspath, '{0}.{1}'.format(tile.name, filetype))]
+                
+        surfacepatch ={}
+
+
+        for point in points:
+            index,x,y,z=point
+            pxmin = float(float(x)-float(radius))
+            pymin = float(float(y)-float(radius))
+            pxmax = float(float(x)+float(radius))
+            pymax = float(float(y)+float(radius))
+
+            start = time.process_time()
+
+            print('\n\nWorking with point -----> {0}'.format(index))
+            outtxt = os.path.join(tiledir, 'GCP_{0}.txt'.format(index))
+            outputfiles.append(outtxt)
+            print('generating patch')
+            subprocessargs=['C:/LAStools/bin/las2las.exe','-i', '-use_lax'] + neighbourlasfiles +['-inside', pxmin,pymin,pxmax,pymax, '-o',  outsqfile,'-merged','-last_only', '-olaz']
+            subprocessargs=list(map(str,subprocessargs))  
+            print(subprocessargs)
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+            subprocessargs=['C:/LAStools/bin/las2las.exe','-i', outsqfile, '-inside_circle', x,y,radius, '-o',  outtxt, '-otxt', '-rescale', 0.001, 0.001, 0.001,'-oparse', 'xyz']
+            subprocessargs=list(map(str,subprocessargs))  
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+
+            #lines = [line.rstrip('\n')for line in open(outtxt)]
+            
+            i =0
+            print('reading patch file')
+
+            surfacepatch = SurfacePatch()
+            f = open(outtxt)
+            for line in f.readlines():
+
+                line = line.rstrip("\n")
+                ln = line.split(' ')
+                i +=1
+                if ln[0] == '':
+                    print('No Surface points found in file {0}'.format(outtxt))
+                else:
+                    #print(i,ln[0],ln[1],ln[2])
+                    dz = round(float(z)- float(ln[2]),3)
+                    if ( -1.0 < dz < 1.0 ):
+                        surfacepatch.addSurfacePoint(i,float(ln[0]),float(ln[1]),float(ln[2]),dz, True)
+                    else:
+                        surfacepatch.addSurfacePoint(i,float(ln[0]),float(ln[1]),float(ln[2]),dz, False)
+            
+            
+            #Calculate initial statistics
+            if len(surfacepatch) >=2:
+                average1 = surfacepatch.calc_average('z')
+                print('Initial average : {0}'.format(average1))
+                stddev1= surfacepatch.calc_stdev('z')
+                print('Initial Std Deviation : {0}'.format(stddev1))
+                
+                filter_val = min(stddev1, 0.05)
+                print('Filtering patch data by 3*{0} ==>>>> '.format(filter_val))
+
+                accepted, rejected = surfacepatch.filter_data(filter_val*3, average1)
+                total = accepted+rejected
+                print('Total of points in patch {0}'.format(total))
+                print('No of accepted points in patch : {0}'.format(accepted))
+                print('No of rejected points in patch : {0}'.format(rejected))
+
+                #Point List statistics
+                
+                if not rejected ==0:
+                    fav = float(surfacepatch.finalaverage)
+                    fstddev = surfacepatch.finalstddev
+
+                else:
+                    fav = average1
+                    fstddev = stddev1
+
+                if fstddev <= 0.1:
+                    diff = round((fav-z), 4)
+                    print(fav, fstddev)
+                    wrl = '{0} {1} {2} {3} {4} {5} {6}\n'.format(str(diff),fav,x,y,z,index, fstddev)
+                    otf.writelines(wrl)
+
+
+                else:
+                    print("Rejecting patch {0} as final std dev is greater than 0.05".format(index))
+            else:
+                print("Not enough patch points to calculate average")
+
+            end = time.process_time()
+            timetaken = end -start   
+            print('Finished with point -----> {0}\ntime taken - {1}\n\n'.format(index, timetaken))
+    
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
+
+    except Exception as e:
+        print('CGP output Failed for {0} at Subprocess - {1}.'.format(tile.name, e))
+        log = 'CGP output Failed for {0} at Subprocess - {1}.'.format(tile.name, e)
+        return(False, None, log)
+
+    finally:
+       
+        otf.close()
+        if os.path.isfile(outfile):
+            log = 'Per Tile GCP Statistics Success for: {0}.'.format(tile.name)
+            return(True, outfile, log)
+
+        else:
+            log = 'Per Tile CGP Statistics Failed for: {0}.'.format(tile.name)
+            print(log)
+            return(False, None, log)
+    
+def index(input):
+   
+    log = ''
+    try:
+        subprocessargs=['C:/LAStools/bin/lasindex.exe','-i', input]
+        subprocessargs=list(map(str,subprocessargs)) 
+        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+        return(True, None, "Success")
+
+    except subprocess.CalledProcessError as suberror:
+        log=log +'\n'+ "{0}\n".format(suberror.stdout)
+        print(log)
+        return (False,None,log)
+
+    except:
+        return(False, None, "Error")
+
+def PointTin(tilelayout,buffer,laspath, outpath, filetype,tile,points,gndclasses,namepattern):
     log = ''
     tile = tilelayout.gettile(tile)
     outfile=os.path.join(outpath,'CGP_{0}_result.txt'.format(tile.name)).replace('\\','/')
     gcpfile=os.path.join(outpath,'CGP_{0}.txt'.format(tile.name)).replace('\\','/')
     neighbourlasfiles = []
  
-    try:    
-        try:
-            neighbours = tile.getneighbours(buffer)
-  
-        except:
-            print("tile: {0} does not exist in Tilelayout file".format(tile.name))
+    try:
+        if not buffer == 0:    
+            try:
+                
+                neighbours = tile.getneighbours(buffer)
+                
+            except:
+                print("tile: {0} does not exist in Tilelayout file".format(tile.name))
 
-        for neighbour in neighbours:
-            neighbour = os.path.join(laspath,'{0}.{1}'.format(neighbour, filetype)).replace('\\','/')
+            for neighbour in neighbours:
+                if namepattern == '':
+                    neighbour = os.path.join(laspath,'{0}.{1}'.format(neighbour, filetype)).replace('\\','/')
+                else:
+                    x,y = neighbour.split("_")
+                    filename = namepattern.replace("%X%",x)
+                    filename = filename.replace("%Y%",y)
+                    neighbour = os.path.join(laspath,filename)
 
-            if os.path.isfile(neighbour):
-                neighbourlasfiles.append(neighbour) 
-        
+                if os.path.isfile(neighbour):
+                    neighbourlasfiles.append(neighbour) 
+        else:
+            neighbourlasfiles = [os.path.join(laspath, '{0}.{1}'.format(tile.name, filetype))]
 
         f = open(gcpfile,'w')
         for point in points:
@@ -131,7 +314,7 @@ def CGPCheck(tilelayout,buffer,laspath, outpath, filetype,tile,points,gndclasses
         else
         '''
         subprocessargs=['C:/LAStools/bin/lascontrol.exe','-i'] + neighbourlasfiles +['-merged','-cp', gcpfile ,'-cp_out',outfile] + classes
-        subprocessargs=list(map(str,subprocessargs))  
+        subprocessargs=list(map(str,subprocessargs))       
         p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
 
     except subprocess.CalledProcessError as suberror:
@@ -153,389 +336,864 @@ def CGPCheck(tilelayout,buffer,laspath, outpath, filetype,tile,points,gndclasses
             log = 'CGP output Failed for: {0}.'.format(tile.name)
             return(False, None, log)
 
-def color_negative_red(value):
-    """
-    Colors elements in a dateframe
-    green if positive and red if
-    negative. Does not color NaN
-    values.
-    """
 
-    if value < 0:
-        color = 'red'
-    elif value > 0:
-        color = 'green'
-    else:
-        color = 'black'
-
-    return 'color: %s' % color
-
-def NoiseRemove(input, output, noisestep, isopoints, filetype):
-    log = ''
-
-    try:
-        subprocessargs=['C:/LAStools/bin/lasnoise.exe','-i',input,'-o{0}'.format(filetype),'-o',output,'-step',noisestep, '-isolated', isopoints] 
-        subprocessargs=list(map(str,subprocessargs)) 
-        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)  
-
-    except subprocess.CalledProcessError as suberror:
-        log=log +'\n'+ "{0}\n".format(suberror.stdout)
-        return (False,None,log)
-
-    except:
-        log = "\n Noise removal failed for {0} \n Exception {1}".format(input, e)
-        print(log)
-        return(False,None, log)
-
-    finally:
-        if os.path.isfile(output):
-            log = '\nNoise removal completed for {0}'.format(input)
-            return (True, output, log)
-        else:
-            log ='\nNoise removal for {0} Failed'.format(input)
-            return (False, None, log)
-
-def ClassifyGround(input, output, tile, buffer, step, spike, downspike, bulge, offset):
-    log = ''
- 
-    keep='-keep_xy {0} {1} {2} {3}'.format(str(tile.xmin-buffer), tile.ymin-buffer,tile.xmax+buffer,tile.ymax+buffer)
-    keep=keep.split()
-
-    try:
-        #lasground_new -i neighbourlasfiles -o <name>_gnd.laz -step 10 -spike 0.5 -down_spike 1.0 -bulge 2.5 -offset 0.1 -fine
-        subprocessargs=['C:/LAStools/bin/lasground_new.exe','-i']+input+['-o',output,'-merged','-step',step, '-spike', spike, '-down_spike', downspike, '-bulge', bulge, '-offset', offset, '-fine'] + keep
-        subprocessargs=list(map(str,subprocessargs))
-        p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True) 
-
-    except subprocess.CalledProcessError as suberror:
-        log=log +'\n'+ "{0}\n".format(suberror.stdout)
-        print(log)
-        return (False,None,log)
-
-    except:
-        log = "\nClassifying ground failed for {0} \n at Exception {1}".format(output, e)
-        print(log)
-        return(False,None, log)
-
-    finally:
-        if os.path.isfile(output):
-            log = '\nClassifying ground completed for {0}'.format(output)
-            return (True, output, log)
-        else:
-            log ='\nClassifying ground  for {0} Failed'.format(output)
-            print(log)
-            return (False, None, log)
-
-
-def classifyFile(tilelayout,buffer,inputfolder,noiseremoveddir,grounddir,filetype,filename,points,gndclasses,noisestep,isopoints, gndstep, spike, downspike, bulge, offset):
-
-
-        
-    #Remove noise
-    #######################################################################################################################
-    input = '{0}/{1}.{2}'.format(inputfolder, filename, filetype)
-    output = '{0}/{1}.{2}'.format(noiseremoveddir, filename, filetype)
-
-
-    
-    NOISE_RESULTS=NoiseRemove(input, output, noisestep, isopoints, filetype)
-
-    #Classify ground
-    #######################################################################################################################
-
-    log = ""
-    if NOISE_RESULTS[0]:
-        tilename = filename
-
-        #Get Neigbouring las files
-        print('Creating tile neighbourhood for : {0}'.format(tilename))
-        tile = tilelayout.gettile(tilename)
-        neighbourlasfiles = []
-
-        try:
-            neighbours = tile.getneighbours(buffer)
-        except:
-            print("tile: {0} does not exist in geojson file".format(tilename))
-
-        #print('Neighbourhood of {0} las files detected in/overlapping {1}m buffer of :{2}\n'.format(len(neighbours),buffer,tilename))
-
-        for neighbour in neighbours:
-            neighbour = os.path.join(noiseremoveddir,'{0}.{1}'.format(neighbour, filetype)).replace('\\','/')
-
-            if os.path.isfile(neighbour):
-                neighbourlasfiles.append(neighbour)
-
-        input = neighbourlasfiles
-        output = os.path.join(grounddir,'{0}.{1}'.format(tilename, filetype)).replace('\\','/')
-        MAKE_GROUND_RESULTS = ClassifyGround(input, output, tile, buffer, gndstep, spike, downspike, bulge, offset)
-
-    if MAKE_GROUND_RESULTS[0]:
-        log = 'Ground classification for {0} : Completed'.format(filename)
-        return (True, output, log)
-    
-    else:
-        log = 'Ground classification for {0} : FAILED'.format(filename)
-        return (False, None, log)
 
 #-----------------------------------------------------------------------------------------------------------------
 #Main entry point
 #-----------------------------------------------------------------------------------------------------------------
-def main(argv):
+def main():
+
 
     freeze_support() 
     args = param_parser()
 
-    filepattern = args.filepattern
-    inputfolder = args.inputfolder
 
-    filetype=args.filetype
-    dt = strftime("%y%m%d_%H%M")
-    outputpath = AtlassGen.makedir(os.path.join(inputfolder, '{0}_GCP_Report'.format(dt)))
+    if args.command == "TIN_method":
 
+        print("Starting Analysis using TIN method")
+        inputfolder = args.inputfolder
+        outputfolder = args.outputpath
+        cores=args.cores
+        deltax = args.deltax
+        deltay = args.deltay
+        user_std = args.armse
+        dt = strftime("%y%m%d_%H%M")
+        outputpath = AtlassGen.makedir(os.path.join(outputfolder, 'GCP_Report_{0}_{1}'.format(dt,user_std)))
+        control=args.control
+        genreport = args.genreport
+        namepattern = ''
+        gndclasses=args.gndclass.split()
 
-    print("Reading {0} files \n".format(filetype))
-
-    filepattern = args.filepattern.split(';')
-    user_std = args.armse
-    lasfiles=AtlassGen.FILELIST(filepattern, inputfolder)
-
-    if len(lasfiles) ==0:
-        print("Exiting as no las files found, please check file type & filter pattern")
-        exit()
-    
-    control=args.control
-    tilelayoutfile=args.tilelayoutfile
-    buffer=args.buffer
-    gndclasses=args.gndclass.split()
-    cores=args.cores
-    deltax = args.deltax
-    deltay = args.deltay
-    hasindex = args.hasindex
-    classify = args.classify
-    tilelayout = AtlassTileLayout()
-    tilelayout.fromjson(tilelayoutfile)
-
-    logpath = os.path.join(outputpath,'log_report.txt').replace('\\','/')
-    log = open(logpath, 'w')
-
-    lines = [line.rstrip('\n')for line in open(control)]
-    index=0
-
-
-    if classify:
-
-        noiseremoveddir = AtlassGen.makedir(os.path.join(outputpath, 'Noise_Removed'))
-        grounddir = AtlassGen.makedir(os.path.join(outputpath, 'Ground'))
-
-
-
-    # Read the GCP files to get the GCP points
-    #######################################################################################################################
-    
-    GCPTile={}
-    results = []
-    for line in lines:
-        line=line.split()
-
-        if hasindex:
-            if len(line) <=4:
-
-                index=str(line[0])
-                x,y,z=float(line[1]),float(line[2]),float(line[3])
-            else:
-                print("GCP file not accepted, check if index has spaces")
-                exit()
-        else:
-            index+=1
-            x,y,z=float(line[0]),float(line[1]),float(line[2])
-
-        for file in lasfiles:
-            path, filename, ext = AtlassGen.FILESPEC(file)
-            tile = tilelayout.gettile(filename)
-            if tile.xmin<x<tile.xmax and  tile.ymin<y<tile.ymax:
-                if tile.name in GCPTile.keys():
-                    GCPTile[tile.name].append([index,x,y,z])
-                else:
-                    GCPTile[tile.name]=[[index,x,y,z]]
-          
-    print('GCP Points found in {0} files'.format(len(GCPTile)))
-    #Classify and Generate the results files for tiles that has GCP
-    ##############################################################################################################################
-    GEN_CONTROL_TASKS={}      
-    CLASSIFY_TASK={}
-    for tile in GCPTile.keys():
-
-        points=GCPTile[tile]
-
-        if classify:
-            CLASSIFY_TASK[tile] = AtlassTask(tile, classifyFile,tilelayout,buffer,inputfolder,noiseremoveddir,grounddir,filetype,tile,points, gndclasses,args.noisestep, args.isopoints, args.gndstep, args.spike, args.downspike, args.bulge, args.offset)
-        
-        else:
-            GEN_CONTROL_TASKS[tile]= AtlassTask(tile, CGPCheck,tilelayout,buffer,inputfolder,outputpath,filetype,tile,points,gndclasses)
-        #CGPCheck(tilelayout,buffer,outputpath,filetype,tile,points,gndclasses)
-    
-    if classify:
-        print("Starting ground classification")
-        p=Pool(processes=cores)      
-        classify_results=p.map(AtlassTaskRunner.taskmanager,CLASSIFY_TASK.values())
-
-        for result in classify_results:
-            if result.success:
-                tile = result.name
-                print(result.name)
-                points = GCPTile[tile]
-                inputfolder = grounddir
-                GEN_CONTROL_TASKS[tile]= AtlassTask(tile, CGPCheck,tilelayout,buffer,inputfolder,outputpath,filetype,tile,points,gndclasses)
-            else:
-                print("Could not classify {0}, Continuing without ........".format(result.name))
-                
-        
-        p=Pool(processes=cores)      
-        results=p.map(AtlassTaskRunner.taskmanager,GEN_CONTROL_TASKS.values())
-        lasfiles = glob.glob('{0}/*.{1}'.format(grounddir,filetype))
-
-    else:
-        p=Pool(processes=cores)      
-        results=p.map(AtlassTaskRunner.taskmanager,GEN_CONTROL_TASKS.values())
-
-
-# Generate the statistical report
-##############################################################################################################################
-    total_gcp_points = len(lines)
-    print('\nNo of GCP points in control: {0}'.format(total_gcp_points))
-
-    pointlist = PointList()
-    report_hist = os.path.join(outputpath,'points_dist.png').replace('\\', '/')
-    report_pdf = os.path.join(outputpath,'Statistical_Report_3Sigma_{0}_{1}.pdf'.format(args.projname, args.areaname)).replace('\\', '/')
-   
-    for result in results:
-        f = open(result.result)
-        for line in f.readlines():
-            line = line.rstrip("\n")
-            z = line.split(' ')
-            diff = round(float(z[0]), 4)
-            pointlist.addPoint(z[5],z[2],z[3],z[1],z[4],diff)
+        scriptpath = os.path.dirname(os.path.realpath(__file__))
+        print(scriptpath)
+        if args.hasfilename:
             
-    gcp_outof_range = total_gcp_points-len(pointlist)
-    print('\nNo of GCPs out of range: {0}'.format(gcp_outof_range))
+            if args.namepattern == None:
+                print("You have selected hasfilename, but the naming convention is not given")
+                exit
+            else:
+                namepattern = args.namepattern
+                searchpattern=namepattern.replace("%X%","*")
+                searchpattern=searchpattern.replace("%Y%","*")
+                searchpattern=searchpattern.replace("%BLAH%","*")
+                print(searchpattern)
+                patternsplit=searchpattern.split("*")
+            
+                print(patternsplit)
+                addzero = args.addzero
+
+
+        hasindex = args.hasindex
+
+
+        if not genreport:
+
+            filetype=args.filetype
+
+            filepattern = args.filepattern
+            print("Reading {0} files \n".format(filetype))
+
+            filepattern = args.filepattern.split(';')
+
+            lasfiles=AtlassGen.FILELIST(filepattern, inputfolder)
+            
+
+            if len(lasfiles) ==0:
+                print("Exiting as no las files found, please check file type & filter pattern")
+                exit()
+            
+            tilelayoutfile=args.tilelayoutfile
+            buffer=args.buffer
+
+            tilelayout = AtlassTileLayout()
+            tilelayout.fromjson(tilelayoutfile)
+            print(len(tilelayout))
+
+
+        logpath = os.path.join(outputpath,'log_report.txt').replace('\\','/')
+        log = open(logpath, 'w')
+
+        lines = [line.rstrip('\n')for line in open(control)]
+
+
+        if not genreport:
+
+            
+            # Read the GCP files to get the GCP points
+            #######################################################################################################################
+            INDEX_TASK={}
+            GCPTile={}
+            results = []
+            originalpoints=OrderedDict()
+            PATCH_GEN_TASK = {}
+            index=0
+            for line in lines:
+
+                line=line.split()
+                # print('line', line)
+
+                if hasindex:
+                    if len(line) <=4:
+
+                        index=str(line[0])
+                        x,y,z=float(line[1]),float(line[2]),float(line[3])
+                        originalpoints[index]=[round(x,3),round(y,3),round(z,3)]
+                    else:
+                        print("GCP file not accepted, check if index has spaces")
+                        exit()
+                else:
+                    index+=1
+                    x,y,z=float(line[0]),float(line[1]),float(line[2])
+                    originalpoints[str(index)]=[round(x,3),round(y,3),round(z,3)]
+
+                
+                for file in lasfiles:
+                    if not args.hasfilename:
+                        path, filename, ext = AtlassGen.FILESPEC(file)
+                        #print(filename)
+                        tile = tilelayout.gettile(filename)
+                        if tile==None:
+                            pass
+                        elif tile.xmin<x<tile.xmax and  tile.ymin<y<tile.ymax:
+                            if tile.name in GCPTile.keys():
+                                GCPTile[tile.name].append([index,x,y,z])
+                            else:
+                                GCPTile[tile.name]=[[index,x,y,z]]
+
+                    else:
+                        filespec=AtlassGen.FILESPEC(file)
+                        filename = '{0}_{1}'.format(filespec[1],filespec[2])
+        
+                        for rep in patternsplit:
+                            if rep!='':
+                                filename = filename.replace(rep,"_")
+                        
+                        filename = filename.replace("_"," ")
+                        filename = filename.strip()
+                        coords=filename.split()
+
+                        if namepattern.find("%X%")>namepattern.find("%Y%"):
+                            coords.reverse()
+                        xm=int(float(coords[0])*addzero)
+                        ym=int(float(coords[1])*addzero)
+
+                        tilename = '{0}_{1}'.format(xm,ym)
+                        #print(tilename)
+
+                        tile = tilelayout.gettile(tilename)
+
+                        if tile==None:
+                            print("tile {0} not found in tilelayout".format(tile.name))
+                        
+                        elif tile.xmin<x<tile.xmax and  tile.ymin<y<tile.ymax:
+                                print(tile.name, x,y, z,index)
+                                if tile.name in GCPTile.keys():
+                                    GCPTile[tile.name].append([index,x,y,z])
+                                else:
+                                    GCPTile[tile.name]=[[index,x,y,z]]
+                
+            print('GCP Points found in {0} files'.format(len(GCPTile)))
+            
+            #Generate the results files for tiles that has GCP
+            ##############################################################################################################################
+            GEN_CONTROL_TASKS={}      
+
+            print('Ground Classes used : {0}'.format(gndclasses))
+            for tile in GCPTile.keys():
+
+                points=GCPTile[tile]
+
+                GEN_CONTROL_TASKS[tile]= AtlassTask(tile, PointTin,tilelayout,buffer,inputfolder,outputpath,filetype,tile,points,gndclasses,namepattern)
+                #CGPCheck(tilelayout,buffer,outputpath,filetype,tile,points,gndclasses)
+            
+
+            print("Starting Point to Tin method")
+            p=Pool(processes=cores)      
+            results=p.map(AtlassTaskRunner.taskmanager,GEN_CONTROL_TASKS.values())
+            
+            pointlist = PointList()
+            
+            if len(results) ==0:
+                print("Exiting as no data caluclated")
+                exit()
+
+            for result in results:
+                log.write(result.log)
+                f = open(result.result)
+
+                for line in f.readlines():
+                    line = line.rstrip("\n")
+                    z = line.split(' ')
+                    if z[0] == '-' or z[1] == '-':
+                        print('Lascontrol - None of the points cover any control point. all filtered or too far.')
+                    else:
+                        diff = round(float(z[0]), 3)
+
+                        pointlist.addPoint(z[5],z[2],z[3],z[1],z[4],diff,0.0)
+
+                f.close()
+
+        else:
+            index=0
+            originalpoints=OrderedDict()
+            for line in lines:
+                line=line.split()
+
+                if hasindex:
+                    if len(line) <=4:
+
+                        index=str(line[0])
+                        x,y,z=float(line[1]),float(line[2]),float(line[3])
+                        originalpoints[index]=[round(x,3),round(y,3),round(z,3)]
+                    else:
+                        print("GCP file not accepted, check if index has spaces")
+                        exit()
+                else:
+                    index+=1
+                    x,y,z=float(line[0]),float(line[1]),float(line[2])
+                    originalpoints[str(index)]=[round(x,3),round(y,3),round(z,3)]
+
+            result_files = glob.glob(inputfolder+'/*_result.txt')
+            pointlist = PointList()
+
+            for file in result_files:
+                f = open(file)
+                for line in f.readlines():
+                    line = line.rstrip("\n")
+                    z = line.split(' ')
+                    if z[0] == '-' or z[1] == '-':
+                        print('Lascontrol - None of the points cover any control point. all filtered or too far.')
+                    else:
+                        diff = round(float(z[0]), 3)
+                        if len(z) ==7:
+                            patchstddev = z[6]
+                        else:
+                            patchstddev = 0.0
+                        pointlist.addPoint(z[5],z[2],z[3],z[1],z[4],diff,patchstddev)
+
+                f.close()
+        
+        # Generate the statistical report
+        ##############################################################################################################################
+        
+        report_hist = os.path.join(outputpath,'points_dist.png').replace('\\', '/')
+        report_pdf = os.path.join(outputpath,'GCP_Report_{0}_{1}.pdf'.format(args.projname, args.areaname)).replace('\\', '/')
+        
+        total_gcp_points = len(lines)
+        print('\nNo of GCP points in control: {0}'.format(total_gcp_points))
+
+        print('\nNo of GCP points used for Analysis : {0}'.format(len(pointlist.points)))
+
+        if len(pointlist) == 1:
+            average1=pointlist.calc_average('dz')
+            stddev1 = 0
+            print('\n\n-------------Initial Stats :--------------\n Average : {0} \n Standard Deviation : {1}'.format(average1, stddev1))
+            print('\nUser input Standard Deviation : {0}'.format(user_std))
+                      
+            accepted = 1
+            rejected = 0
+            total = accepted+rejected
+
+            print('Total number of data sampled {0}'.format(total))
+            print('No of accepted data : {0}'.format(accepted))
+            print('No of rejected data : {0}'.format(rejected))
+
+            
+            #Point List statistics
+            
+            fav = average1
+            fstddev = 'not calculated'
+            rmse = 'not calculated'
+            ci95 = 'not calculated'
+
+            shift = round((0-(fav)), 4)
+
+            print('\n\n------------------Final Stats :--------------------\nAverage: {0} \nStandard Deviation: {1}\n RMSE : {2}\n CI95 : {3}\n Z shift : {4}'.format(fav, fstddev, rmse, ci95, shift))
+            
+
+            #Check Report Quality
+            quality = ''
+            note = 'Only one GCP found'
+            meanval = fav
     
-    #Calculate initial statistics
-    average1 = pointlist.calc_average('dz')
-    stddev1 = pointlist.calc_stdev('dz')
-    print('\n\n-------------Initial Stats :--------------\n Average : {0} \n Standard Deviation : {1}'.format(average1, stddev1))
-    print('\nUser input Standard Deviation : {0}'.format(user_std))
-    # Filter data
-    filter_val = min(stddev1, user_std)
-    print('\n\nFiltering Data by 3*{0} ==>>>> '.format(filter_val))
-    
-    accepted, rejected = pointlist.filter_data(filter_val*3)
-    total = accepted+rejected
-    print('Total number of data sampled {0}'.format(total))
-    print('No of accepted data : {0}'.format(accepted))
-    print('No of rejected data : {0}'.format(rejected))
 
-    #Point List statistics
-    
-    fav = pointlist.finalaverage
-    fstddev = pointlist.finalstddev
-    rmse = pointlist.rmse
-    ci95 = pointlist.ci95
+        else:    
+            #Calculate initial statistics
+            average1 = pointlist.calc_average('dz')
+            stddev1 = pointlist.calc_stdev('dz')
+            print('\n\n-------------Initial Stats :--------------\n Average : {0} \n Standard Deviation : {1}'.format(average1, stddev1))
+            print('\nUser input Standard Deviation : {0}'.format(user_std))
+            # Filter data
+            filter_val = min(stddev1, user_std)
+            print('\n\nFiltering Data by 3*{0} ==>>>> '.format(filter_val))
+        
+            accepted, rejected = pointlist.filter_data(filter_val*3)
+            total = accepted+rejected
+            print('Total number of data sampled {0}'.format(total))
+            print('No of accepted data : {0}'.format(accepted))
+            print('No of rejected data : {0}'.format(rejected))
 
-    if not (fav or fstddev or rmse or ci95):
-        print('Some stats were not calculated')
-        exit()
-    
-    
-    shift = round((0-(pointlist.finalaverage)), 4)
+            #Point List statistics
+            
+            fav = pointlist.finalaverage
+            fstddev = pointlist.finalstddev
+            rmse = pointlist.rmse
+            ci95 = pointlist.ci95
 
-    print('\n\n------------------Final Stats :--------------------\nAverage: {0} \nStandard Deviation: {1}\n RMSE : {2}\n CI95 : {3}\n Z shift : {4}'.format(fav, fstddev, rmse, ci95, shift))
-    
-    #generate  histogram
-    dataset = []
-    for key, point in pointlist.points.items():
-        if point.accepted:
-            dataset.append(point.dzshifted)
+            if not (fav or fstddev or rmse or ci95):
+                print('Some stats were not calculated')
+                exit()
+            
+        
+            shift = round((0-(pointlist.finalaverage)), 4)
 
-    bins = 'auto'
-    plt.xlim([min(dataset), max(dataset)])
-    plt.hist(dataset, bins=bins, alpha=0.5)
-    plt.title('Histogram of height difference')
-    plt.xlabel('Height differences after a shift of {0}m'.format(shift))
-    plt.ylabel('count')
-    plt.savefig(report_hist)
-    
-     
-    #Generate data table
-    data_all = []
-    for key, point in pointlist.points.items():
-        data_all.append({'index':point.index, 'x':point.x, 'y':point.y, 'lidarz':point.lidarz,'dz':point.dz, 'controlz':point.controlz, 'dz after shift':point.dzshifted})
+            print('\n\n------------------Final Stats :--------------------\nAverage: {0} \nStandard Deviation: {1}\n RMSE : {2}\n CI95 : {3}\n Z shift : {4}'.format(fav, fstddev, rmse, ci95, shift))
+            
+            #generate  histogram
+            dataset = []
+            
+            for key, point in pointlist.points.items():
+                originalpoints[key].append('yes')         
+                if point.accepted:
+                    #print(point.dzshifted)
+                    dataset.append(point.dzshifted)
+            if len(dataset)==0:
+                print('all points rejected')
+            print('dataset:',len(dataset))
+            print([min(dataset), max(dataset)])
+            bins = 'auto'
+            plt.xlim([min(dataset), max(dataset)])
+            plt.hist(dataset, bins=bins, alpha=0.5,color = "#ed6363")
+            plt.title('Histogram of height difference')
+            plt.xlabel('Height differences after a shift of {0}m'.format(shift))
+            plt.ylabel('count')
+            plt.savefig(report_hist)
+        
+            meanval = pointlist.finalaverage
+        
+        #Generate data table
+        data_all = []
+        outside = 0
+        data_txt = ''
+        outside_txt = ''
+        data_acp_txt = ''
 
-    df = pd.DataFrame(data_all)
-    #Order columns
-    df = df[['index','x', 'y','controlz', 'lidarz', 'dz', 'dz after shift']]
-    df.sort_values(by=['index'])
-    df.style.applymap(color_negative_red, subset=['dz'])
+        for key, gcp in originalpoints.items():
+
+        
+            if key in pointlist.points.keys():
+                point=pointlist.points[key]
+                found=True
+            else:
+                found=False
+                outside+=1
 
 
-    #Create PDF report
-    points = total_gcp_points
-    points_accept = accepted
-    points_accept_perc = round((accepted/points*100), 1)
-    points_rej = rejected
-    points_rej_perc = round(((rejected)/points*100), 1)
+            if not found:
+                #did not return
+                data_all.append({'index':key, 'x':originalpoints[key][0], 'y':originalpoints[key][1], 'lidarz':'None','dz':'None', 'controlz':originalpoints[key][2], 'dz after shift':'Outside'})
+                outside_txt = outside_txt + '{0} {1} {2} {3}\n'.format(key,originalpoints[key][0], originalpoints[key][1], originalpoints[key][2])
+            else:
+                data_all.append({'index':point.index, 'x':point.x, 'y':point.y, 'lidarz':point.lidarz,'dz':point.dz, 'controlz':point.controlz, 'dz after shift':point.dzshifted})
+                data_acp_txt = data_acp_txt + '{0} {1} {2} {3} {4} {5}\n'.format(point.dz, point.lidarz, point.x, point.y, point.controlz, point.index)
+            df = pd.DataFrame(data_all)
+
+            #Order columns
+            df = df[['index','x', 'y','controlz', 'lidarz','dz', 'dz after shift']]
+            df.sort_values(by=['index'])
 
 
-    #Check Report Quality
-    quality = ''
-    note = ''
-    if points_rej_perc<5:
-        quality = 'Accepted'
-        if rmse<3*user_std and rmse>-3*user_std:
-            quality = 'Accepted'
+        #Write the results txt file for all the accepted points/patches
+        
+        txtfile = os.path.join(outputpath,'GCP_Result_ALL.txt').replace('\\','/')
+        with open(txtfile, 'w') as txtf:
+            txtf.write(data_acp_txt)
+
+        
+        outsidetxtfile = os.path.join(outputpath,'GCP_outside.txt').replace('\\','/')
+        with open(outsidetxtfile, 'w') as outf:
+            outf.write(outside_txt)
+
+        pointlist.createOutputFiles(outputpath)
+
+
+        gcp_outof_range = outside
+
+        path, control_file, ext = AtlassGen.FILESPEC(control)
+        control_file = '{0}.{1}'.format(control_file,ext)
+        #Create PDF report
+        points = total_gcp_points
+        points_accept = accepted
+        points_accept_perc = round((accepted/points*100), 1)
+        points_rej = rejected
+        points_rej_perc = round(((rejected)/points*100), 1)
+
+        if len(pointlist) > 1:
+            #Check Report Quality
+            quality = ''
             note = ''
+            if points_rej_perc<5:
+                quality = 'Accepted'
+                if rmse<3*user_std and rmse>-3*user_std:
+                    quality = 'Accepted'
+                    note = ''
+                else:
+                    quality = 'Not Accepted'
+                    note = "The RMSE is more than the {0}".format(rmse)
+            else:
+                quality = 'Not Accepted'
+                note = " (More than 5% of the points rejected)"
+
+ 
+        outcome = 'Out of Range'
+        method_head = "Point to Tin"
+        method = "This report was generated by comparing supplied ground control points (GCPs) to a Triangulated Irregular Network (TIN) generated from LiDAR points classified as ground. Points with vertical Standard Deviation of greater than or less than {0}m from the Average Vertical Difference have been rejected from analysis. The shifts values and statistics shown in this report are suitable for adjusting the LiDAR point cloud. RMSE and CI95 values shown are calculated after average shifts were applied.".format(user_std)
+        print('\nNo of GCPs out of range: {0}'.format(gcp_outof_range))
+    
+        gcp_outof_range_perc = round(gcp_outof_range/points*100,1)
+        dt = strftime("%d/%m/%y")
+        logo = 	"{0}\\icons\\Aerometrex_logo_FINAL_new.png".format(scriptpath)
+        env = Environment(loader=FileSystemLoader("{0}\\templates".format(scriptpath)))
+        template = env.get_template("template.html")
+        template_vars = {"project" : args.projname,
+                        "area" : args.areaname,
+                        "points": points,
+                        "points_accept": points_accept,
+                        "points_accept_perc": points_accept_perc,
+                        "points_rej": points_rej,
+                        "points_rej_perc": points_rej_perc,
+                        "points_outof_range": gcp_outof_range,
+                        "points_outof_range_perc": gcp_outof_range_perc,
+                        "report": report_hist,
+                        "mean": meanval,
+                        "tsigma": pointlist.finalstddev,
+                        "data": df.to_html(),
+                        "deltax" : deltax,
+                        "deltay" : deltay,
+                        "deltaz" : shift,
+                        "date" : dt,
+                        "rmse" : rmse,
+                        "ci95" : ci95,
+                        "control_file" : control_file,
+                        "logo" : logo,
+                        "quality": quality,
+                        "method": method,
+                        "method_head": method_head,
+                        "outcome" : outcome,
+                        "note" : note}
+        # Render our file and create the PDF using our css style file
+        html_out = template.render(template_vars)
+        stylesheet = os.path.join('{0}\\templates'.format(scriptpath),'style.css').replace('\\', '/')
+        HTML(string=html_out).write_pdf(report_pdf, stylesheets=[stylesheet])
+
+        print("Report Located in : {0}".format(report_pdf))
+        print('Process complete')
+     
+    if args.command == "Patch_Stat_method":
+        print("Starting Analysis using Patch Stat Method")
+
+        inputfolder = args.inputfolder
+        outputfolder = args.outputpath
+        cores=args.cores
+        deltax = args.deltax
+        deltay = args.deltay
+        user_std = args.armse
+        dt = strftime("%y%m%d_%H%M")
+        outputpath = AtlassGen.makedir(os.path.join(outputfolder, '{0}_GCP_Report_{2}_{3}_stdDev_{1}'.format(dt,user_std,args.projname, args.areaname)))
+        control=args.control
+        genreport = args.genreport
+        namepattern = ''
+
+        if args.hasfilename:
+            
+            if args.namepattern == None:
+                print("You have selected hasfilename, but the naming convention is not given")
+                exit
+            else:
+                namepattern = args.namepattern
+                searchpattern=namepattern.replace("%X%","*")
+                searchpattern=searchpattern.replace("%Y%","*")
+                print(searchpattern)
+                patternsplit=searchpattern.split("*")
+            
+                print(patternsplit)
+                addzero = args.addzero
+
+
+        hasindex = args.hasindex
+        radius = args.radius
+        if radius==None or radius ==0:
+            radius = 2
+        if not genreport:
+
+            filetype=args.filetype
+
+            filepattern = args.filepattern
+            print("Reading {0} files \n".format(filetype))
+
+            filepattern = args.filepattern.split(';')
+
+            lasfiles=AtlassGen.FILELIST(filepattern, inputfolder)
+            
+            pointstatdir = AtlassGen.makedir(os.path.join(outputpath, 'Point_Stats'))
+
+            if len(lasfiles) ==0:
+                print("Exiting as no las files found, please check file type & filter pattern")
+                exit()
+            
+            tilelayoutfile=args.tilelayoutfile
+            buffer=args.buffer
+
+            tilelayout = AtlassTileLayout()
+            tilelayout.fromjson(tilelayoutfile)
+            print(len(tilelayout))
+            gndclasses=args.gndclass.split()
+
+        logpath = os.path.join(outputpath,'log_report.txt').replace('\\','/')
+        log = open(logpath, 'w')
+
+        lines = [line.rstrip('\n')for line in open(control)]
+
+
+        if not genreport:
+
+            
+            # Read the GCP files to get the GCP points
+            #######################################################################################################################
+            INDEX_TASK={}
+            GCPTile={}
+            results = []
+            originalpoints=OrderedDict()
+            PATCH_GEN_TASK = {}
+            index=0
+            for line in lines:
+
+                line=line.split()
+
+                if hasindex:
+                    if len(line) <=4:
+
+                        index=str(line[0])
+                        x,y,z=float(line[1]),float(line[2]),float(line[3])
+                        originalpoints[index]=[round(x,3),round(y,3),round(z,3)]
+                    else:
+                        print("GCP file not accepted, check if index has spaces")
+                        exit()
+                else:
+                    index+=1
+                    x,y,z=float(line[0]),float(line[1]),float(line[2])
+                    originalpoints[str(index)]=[round(x,3),round(y,3),round(z,3)]
+
+                
+                for file in lasfiles:
+                    if not args.hasfilename:
+                        path, filename, ext = AtlassGen.FILESPEC(file)
+                        #print(filename)
+                        tile = tilelayout.gettile(filename)
+                        if tile==None:
+                            pass
+                        elif tile.xmin<x<tile.xmax and  tile.ymin<y<tile.ymax:
+                            if tile.name in GCPTile.keys():
+                                GCPTile[tile.name].append([index,x,y,z])
+                            else:
+                                GCPTile[tile.name]=[[index,x,y,z]]
+
+                    else:
+                        filespec=AtlassGen.FILESPEC(file)
+                        filename = '{0}_{1}'.format(filespec[1],filespec[2])
+        
+                        for rep in patternsplit:
+                            if rep!='':
+                                filename = filename.replace(rep,"_")
+                        
+                        filename = filename.replace("_"," ")
+                        filename = filename.strip()
+                        coords=filename.split()
+
+                        if namepattern.find("%X%")>namepattern.find("%Y%"):
+                            coords.reverse()
+                        xm=int(float(coords[0])*addzero)
+                        ym=int(float(coords[1])*addzero)
+
+                        tilename = '{0}_{1}'.format(xm,ym)
+                        #print(tilename)
+
+                        tile = tilelayout.gettile(tilename)
+
+                        if tile==None:
+                            print("tile {0} not found in tilelayout".format(tile.name))
+                        
+                        elif tile.xmin<x<tile.xmax and  tile.ymin<y<tile.ymax:
+                                print(tile.name, x,y, z,index)
+                                if tile.name in GCPTile.keys():
+                                    GCPTile[tile.name].append([index,x,y,z])
+                                else:
+                                    GCPTile[tile.name]=[[index,x,y,z]]
+                
+            print('GCP Points found in {0} files'.format(len(GCPTile)))
+            
+            #Classify and Generate the results files for tiles that has GCP
+            ##############################################################################################################################
+ 
+            SURFCE_AVG_TASK={}
+
+            for tile in GCPTile.keys():
+
+                points=GCPTile[tile]
+
+                SURFCE_AVG_TASK[tile] =  AtlassTask(tile, GenSurfaceStats,tilelayout,buffer,inputfolder,outputpath,filetype,tile,points,radius,pointstatdir,user_std,namepattern)
+                #GenSurfaceStats(tilelayout,buffer,inputfolder,outputpath,filetype,tile,points,radius,pointstatdir,user_std)  
+
+            print("Starting Patch Surface Average method")
+            p=Pool(processes=cores)  
+            results=p.map(AtlassTaskRunner.taskmanager,SURFCE_AVG_TASK.values())
+
+
+            pointlist = PointList()
+            
+            if len(results) ==0:
+                print("Exiting as no data caluclated")
+                exit()
+
+            for result in results:
+                log.write(result.log)
+                f = open(result.result)
+
+                for line in f.readlines():
+                    line = line.rstrip("\n")
+                    z = line.split(' ')
+                    if z[0] == '-' or z[1] == '-':
+                        print('Lascontrol - None of the points cover any control point. all filtered or too far.')
+                    else:
+                        diff = round(float(z[0]), 3)
+
+                        pointlist.addPoint(z[5],z[2],z[3],z[1],z[4],diff,z[6])
+
+                f.close()
+
+        else:
+            index=0
+            originalpoints=OrderedDict()
+            for line in lines:
+                line=line.split()
+
+                if hasindex:
+                    if len(line) <=4:
+
+                        index=str(line[0])
+                        x,y,z=float(line[1]),float(line[2]),float(line[3])
+                        originalpoints[index]=[round(x,3),round(y,3),round(z,3)]
+                    else:
+                        print("GCP file not accepted, check if index has spaces")
+                        exit()
+                else:
+                    index+=1
+                    x,y,z=float(line[0]),float(line[1]),float(line[2])
+                    originalpoints[str(index)]=[round(x,3),round(y,3),round(z,3)]
+
+            result_files = glob.glob(inputfolder+'/*_result.txt')
+            pointlist = PointList()
+
+            for file in result_files:
+                f = open(file)
+                for line in f.readlines():
+                    line = line.rstrip("\n")
+                    z = line.split(' ')
+                    if z[0] == '-' or z[1] == '-':
+                        print('Lascontrol - None of the points cover any control point. all filtered or too far.')
+                    else:
+                        diff = round(float(z[0]), 3)
+                        if len(z) ==7:
+                            patchstddev = z[6]
+                        else:
+                            patchstddev = 0.0
+                        pointlist.addPoint(z[5],z[2],z[3],z[1],z[4],diff,patchstddev)
+
+                f.close()
+        
+        # Generate the statistical report
+        ##############################################################################################################################
+        
+        report_hist = os.path.join(outputpath,'points_dist.png').replace('\\', '/')
+        report_pdf = os.path.join(outputpath,'Statistical_Report_3Sigma_{0}_{1}.pdf'.format(args.projname, args.areaname)).replace('\\', '/')
+        
+        total_gcp_points = len(lines)
+        print('\nNo of GCP points in control: {0}'.format(total_gcp_points))
+
+        print('\nNo of GCP points used for Analysis : {0}'.format(len(pointlist.points)))
+        #Calculate initial statistics
+        average1 = pointlist.calc_average('dz')
+        stddev1 = pointlist.calc_stdev('dz')
+        print('\n\n-------------Initial Stats :--------------\n Average : {0} \n Standard Deviation : {1}'.format(average1, stddev1))
+        print('\nUser input Standard Deviation : {0}'.format(user_std))
+        # Filter data
+        filter_val = min(stddev1, user_std)
+        print('\n\nFiltering Data by 3*{0} ==>>>> '.format(filter_val))
+        
+        accepted, rejected = pointlist.filter_data(filter_val*3)
+        total = accepted+rejected
+        print('Total number of data sampled {0}'.format(total))
+        print('No of accepted data : {0}'.format(accepted))
+        print('No of rejected data : {0}'.format(rejected))
+
+        #Point List statistics
+        
+        fav = pointlist.finalaverage
+        fstddev = pointlist.finalstddev
+        rmse = pointlist.rmse
+        ci95 = pointlist.ci95
+
+        if not (fav or fstddev or rmse or ci95):
+            print('Some stats were not calculated')
+            exit()
+        
+        
+        shift = round((0-(pointlist.finalaverage)), 4)
+
+        print('\n\n------------------Final Stats :--------------------\nAverage: {0} \nStandard Deviation: {1}\n RMSE : {2}\n CI95 : {3}\n Z shift : {4}'.format(fav, fstddev, rmse, ci95, shift))
+        
+        #generate  histogram
+        dataset = []
+        
+        for key, point in pointlist.points.items():
+            originalpoints[key].append('yes')         
+            if point.accepted:
+                #print(point.dzshifted)
+                dataset.append(point.dzshifted)
+        if len(dataset)==0:
+            print('all points rejected')
+        print('dataset:',len(dataset))
+        print([min(dataset), max(dataset)])
+        bins = 'auto'
+        plt.xlim([min(dataset), max(dataset)])
+        plt.hist(dataset, bins=bins, alpha=0.5,color = "#ed6363")
+        plt.title('Histogram of height difference')
+        plt.xlabel('Height differences after a shift of {0}m'.format(shift))
+        plt.ylabel('count')
+        plt.savefig(report_hist)
+        
+        
+        #Generate data table
+        data_all = []
+        outside = 0
+        data_txt = ''
+        outside_txt = ''
+        data_acp_txt = ''
+
+        for key, gcp in originalpoints.items():
+
+        
+            if key in pointlist.points.keys():
+                point=pointlist.points[key]
+                found=True
+            else:
+                found=False
+                outside+=1
+
+            if not found:
+                #did not return
+                data_all.append({'index':key, 'x':originalpoints[key][0], 'y':originalpoints[key][1], 'lidarz':'None','dz':'None', 'controlz':originalpoints[key][2], 'patch stddev':'None', 'dz after shift':'Patch Rejected'})
+                outside_txt = outside_txt + '{0} {1} {2} {3}\n'.format(key,originalpoints[key][0], originalpoints[key][1], originalpoints[key][2])
+            else:
+                data_all.append({'index':point.index, 'x':point.x, 'y':point.y, 'lidarz':point.lidarz,'dz':point.dz, 'controlz':point.controlz, 'patch stddev':point.patchstddev, 'dz after shift':point.dzshifted})
+                data_acp_txt = data_acp_txt + '{0} {1} {2} {3} {4} {5}\n'.format(point.dz, point.lidarz, point.x, point.y, point.controlz, point.index)
+
+
+        df = pd.DataFrame(data_all)
+        #Order columns
+        df = df[['index','x', 'y','controlz', 'lidarz', 'patch stddev','dz', 'dz after shift']]
+        df.sort_values(by=['index'])
+        
+
+
+        #Write the results txt file for all the accepted points/patches
+        
+        txtfile = os.path.join(outputpath,'GCP_Result_ALL.txt').replace('\\','/')
+        with open(txtfile, 'w') as txtf:
+            txtf.write(data_acp_txt)
+
+        
+        outsidetxtfile = os.path.join(outputpath,'GCP_outside.txt').replace('\\','/')
+        with open(outsidetxtfile, 'w') as outf:
+            outf.write(outside_txt)
+
+        pointlist.createOutputFiles(outputpath)
+
+
+        gcp_outof_range = outside
+
+        path, control_file, ext = AtlassGen.FILESPEC(control)
+        control_file = '{0}.{1}'.format(control_file,ext)
+        #Create PDF report
+        points = total_gcp_points
+        points_accept = accepted
+        points_accept_perc = round((accepted/points*100), 1)
+        points_rej = rejected
+        points_rej_perc = round(((rejected)/points*100), 1)
+
+
+        #Check Report Quality
+        quality = ''
+        note = ''
+        if points_rej_perc<5:
+            quality = 'Accepted'
+            if rmse<3*user_std and rmse>-3*user_std:
+                quality = 'Accepted'
+                note = ''
+            else:
+                quality = 'Not Accepted'
+                note = "The RMSE is more than the {0}".format(rmse)
         else:
             quality = 'Not Accepted'
-            note = "The RMSE is more than the {0}".format(rmse)
-    else:
-        quality = 'Not Accepted'
-        note = " (More than 5% of the points rejected)"
+            note = " (More than 5% of the points rejected)"
 
 
-    gcp_outof_range_perc = round(gcp_outof_range/points*100,1)
-    dt = strftime("%d/%m/%y")
-    logo = 	"\\\\10.10.10.100\\projects\\PythonScripts\\icons\\logo.png"
-    env = Environment(loader=FileSystemLoader("\\\\10.10.10.100\\projects\\PythonScripts\\templates"))
-    template = env.get_template("template.html")
-    template_vars = {"project" : args.projname,
-                    "area" : args.areaname,
-                    "points": points,
-                    "points_accept": points_accept,
-                    "points_accept_perc": points_accept_perc,
-                    "points_rej": points_rej,
-                    "points_rej_perc": points_rej_perc,
-                    "points_outof_range": gcp_outof_range,
-                    "points_outof_range_perc": gcp_outof_range_perc,
-                    "report": report_hist,
-                    "mean": pointlist.finalaverage,
-                    "tsigma": pointlist.finalstddev,
-                    "data": df.to_html(),
-                    "deltax" : deltax,
-                    "deltay" : deltay,
-                    "deltaz" : shift,
-                    "date" : dt,
-                    "rmse" : rmse,
-                    "ci95" : ci95,
-                    "logo" : logo,
-                    "quality": quality,
-                    "note" : note}
-    # Render our file and create the PDF using our css style file
-    html_out = template.render(template_vars)
-    stylesheet = os.path.join('\\\\10.10.10.100\\projects\\PythonScripts\\templates','style.css').replace('\\', '/')
-    HTML(string=html_out).write_pdf(report_pdf, stylesheets=[stylesheet])
+        outcome = 'Patches Rejected'
+        method_head = "Statistical/average elevation"
+        method = "This report was generated by comparing supplied ground control points (GCPs) to the average elevation of unclassified last/only return LiDAR points within a {0}m radius of each GCP point. Surfaces with vertical deviation of greater than 1.0m have been rejected in a first pass. After comparison, deviations of greater than 0.05m from the average vertical difference have been rejected from analysis. The shift values and statistics shown in this report are for preliminary validation of LiDAR point cloud, and assessment of supplied ground control only. A final report and final shift values will be calculated from classified LiDAR data once it is available.".format(radius)
+        print('\nNo of Patches Rejected: {0}'.format(gcp_outof_range))
 
-    print('Process complete')
+        gcp_outof_range_perc = round(gcp_outof_range/points*100,1)
+        dt = strftime("%d/%m/%y")
+        logo = 	"{0}\\icons\\logo.png".format(scriptpath)
+        env = Environment(loader=FileSystemLoader("{0}\\templates".format(scriptpath)))
+        template = env.get_template("template.html")
+        template_vars = {"project" : args.projname,
+                        "area" : args.areaname,
+                        "points": points,
+                        "points_accept": points_accept,
+                        "points_accept_perc": points_accept_perc,
+                        "points_rej": points_rej,
+                        "points_rej_perc": points_rej_perc,
+                        "points_outof_range": gcp_outof_range,
+                        "points_outof_range_perc": gcp_outof_range_perc,
+                        "report": report_hist,
+                        "mean": pointlist.finalaverage,
+                        "tsigma": pointlist.finalstddev,
+                        "data": df.to_html(),
+                        "deltax" : deltax,
+                        "deltay" : deltay,
+                        "deltaz" : shift,
+                        "date" : dt,
+                        "rmse" : rmse,
+                        "ci95" : ci95,
+                        "control_file" : control_file,
+                        "logo" : logo,
+                        "quality": quality,
+                        "method": method,
+                        "method_head": method_head,
+                        "outcome" : outcome,
+                        "note" : note}
+        # Render our file and create the PDF using our css style file
+        html_out = template.render(template_vars)
+        stylesheet = os.path.join('{0}\\templates'.format(scriptpath),'style.css').replace('\\', '/')
+        HTML(string=html_out).write_pdf(report_pdf, stylesheets=[stylesheet])
+
+        print("Report Located in : {0}".format(report_pdf))
+        print('Process complete')
         
+
     return
         
 if __name__ == "__main__":
-    main(sys.argv[1:])            
+    main()            

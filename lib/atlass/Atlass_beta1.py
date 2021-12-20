@@ -22,7 +22,7 @@ from scipy import misc
 from scipy.interpolate import griddata
 from scipy.ndimage import morphology
 from scipy.ndimage import filters
-
+import subprocess
 
 class GMScript():
     pass
@@ -202,7 +202,8 @@ class AtlassTile():
         self._params['xmin']=None
         self._params['ymin']=None
         self._params['xmax']=None
-        self._params['ymax']=None        
+        self._params['ymax']=None
+        self._params['modtime']=None   
         self.addparams(**kwargs)
 
     def getneighbours(self,buffer):
@@ -267,7 +268,6 @@ class AtlassTile():
         else:
             raise TypeError('only accepts floats or integers') 
 
-
     @property
     def ymax(self):
         return self._params['ymax']
@@ -280,6 +280,17 @@ class AtlassTile():
             raise TypeError('only accepts floats or integers') 
 
     @property
+    def modtime(self):
+        return self._params['modtime']
+
+    @modtime.setter    
+    def modtime(self, value): 
+        if isinstance(value, str):
+            self._params['modtime']=value
+        else:
+            raise TypeError('only accepts strings') 
+
+    @property
     def params(self):
         return self._params
 
@@ -288,10 +299,10 @@ class AtlassTile():
         #data can be of type dictionary
         print("in param setter")
         if isinstance(data,dict) or isinstance(data,OrderedDict): 
-            for stdkey in ['name','xmin','ymin','xmax','ymax']:
+            for stdkey in ['name','xmin','ymin','xmax','ymax','modtime']:
                 if not stdkey in data.keys():
                     print('Warning: {0} not in keys'.format(stdkey))
-                    print('Current value of {0}'.format(stdkey,self._params[stdkey])) 
+                    print('Current value of {0}'.format(self._params[stdkey])) 
 
             for key,value in data.items():
                 if key =='name':
@@ -303,7 +314,9 @@ class AtlassTile():
                 if key =='xmax':
                     self.xmax=value
                 if key =='ymax':
-                    self.ymax=value                
+                    self.ymax=value            
+                if key =='modtime':
+                    self.modtime=value        
                 else:
                     if isinstance(value,str) or isinstance(value,float) or isinstance(value,int):
                         self._params[key]=value
@@ -326,7 +339,9 @@ class AtlassTile():
             if key =='xmax':
                 self.xmax=value
             if key =='ymax':
-                self.ymax=value                
+                self.ymax=value         
+            if key =='modtime':
+                self.modtime=value          
             else:
                 if isinstance(value,str) or isinstance(value,float) or isinstance(value,int):
                     self._params[key]=value
@@ -373,15 +388,13 @@ class AtlassTileLayout():
                 return self.tiles[tilename]
         else:
             raise TypeError('only accepts strings as tilename')  
-      
-
+    
     def fromdict(self,data):    
        for key, value in data.items():
             if not key in self.tiles:
                 self.tiles[key]=AtlassTile(self, **value)
             else:
                 pass
-
 
     def fromjson(self, jsonfile):
         with open(jsonfile) as fr:
@@ -391,15 +404,38 @@ class AtlassTileLayout():
                  #print(value)
                  tile = {}
                  for key, val in value['properties'].items():
+                     #print('\n\n',key,val)
+                     key=key.lower()
                      if(key == 'tilename'):
                          key = 'name'
+                     if(key == 'name'):
+                         key = 'name'
+                     if(key == 'tile_name'):
+                         key = 'name'                         
+                     if(key == 'xmin'):
+                         val = float(val)
+                     if(key == 'ymin'):
+                         val = float(val)
+                     if(key == 'xmax'):
+                         val = float(val)
+                     if(key == 'ymax'):
+                         val = float(val)
+                     if(key == 'modtime'):
+                         val = str(val)
                      tile[key] = val
-
                  name = tile['name']           
                  tiles[name] = tile
-
             self.fromdict(tiles)
+        #print(len(self.tiles.keys()))
         return 
+
+    def gettilesfrombounds(self,xmin,ymin,xmax,ymax):
+        neighbours=[]
+        for key,tile in self.tiles.items():
+            if tile.xmin<xmin<tile.xmax or tile.xmin<xmax<tile.xmax or xmin<tile.xmin<xmax or xmin<tile.xmax<xmax:
+                if tile.ymin<ymin<tile.ymax or tile.ymin<ymax<tile.ymax or ymin<tile.ymin<ymax or ymin<tile.ymax<ymax:
+                    neighbours.append(tile.name)
+        return neighbours
 
 
     def createGeojsonFile(self, outputfile):
@@ -542,14 +578,109 @@ class AtlassTaskRunner():
 
         return task
 
+class SurfacePoint(object):
+    def __init__(self,index,x,y,z, dz, accepted ):
+        self.index=index
+        self.x=x 
+        self.y=y
+        self.z=z
+        self.dz = dz
+        self.accepted = accepted
+
+
+    def __repr__(self):
+        return (str(self.index),str(self.x), str(self.y), str(self.z), str(self.dz))
+    
+        
+class SurfacePatch:
+    tcaltime = 0
+    def __init__(self):
+        self.points=OrderedDict()
+        self.initalaverage = None
+        self.initalstddev = None
+        self.finalaverage = None
+        self.finalstddev = None
+
+        pass    
+
+    def addSurfacePoint(self, *args):
+        self.points[args[0]]=SurfacePoint(args[0], args[1], args[2], args[3], args[4], args[5])
+
+    def calc_sum(self, attr):
+        sm = sum(float(getattr(point, attr)) for key, point in self.points.items())
+        return sm
+
+    def calc_average(self, attr):
+        data = []
+        for key, point in self.points.items():
+            if point.accepted:
+                data.append(getattr(point, attr))
+        av = round(statistics.mean(data), 3)
+
+        if SurfacePatch.tcaltime<1:
+            print('\n\n')
+            self.initalaverage = av
+        else:
+            self.finalaverage = av
+        return av
+
+    def calc_stdev(self, attr):
+        data = []
+        for key, point in self.points.items():
+            if point.accepted:
+                data.append(getattr(point, attr))
+        std = round(statistics.stdev(data), 4)
+        if SurfacePatch.tcaltime<1:
+            self.initalstddev = std
+        else:
+            self.finalstddev = std
+        SurfacePatch.tcaltime += 1
+        return std
+
+    def filter_data(self, tsigma , initavg):
+        rejected = 0
+        accepted = 0
+        if initavg:
+            filterval_upper = initavg + tsigma
+            filterval_lower = initavg - tsigma
+            print('Data range : {0} - {1}'.format(filterval_lower,filterval_upper))
+            for point in self.points.values():
+
+                if (  filterval_lower < point.z < filterval_upper):
+                    point.accepted = True
+                    accepted +=1
+                else:
+                    point.accepted = False
+                    rejected +=1
+        else:
+            print("Inital average not calculated !")
+            exit()
+
+        self.calc_average('z')
+        print("Final average : {0}".format(self.finalaverage))
+        self.calc_stdev('z')
+        print("Final Std Deviation : {0}".format(self.finalstddev))
+
+
+
+        return (accepted, rejected)
+
+    def __len__(self):
+        return len(self.points.keys())
+
+    def __iter__(self):
+        for key,item in self.points.items():
+            yield item
+
 class Point(object):
-    def __init__(self,index,x,y,lidarz,controlz, dz, accepted=True, dzshifted=None, dzshiftedsq=None ):
+    def __init__(self,index,x,y,lidarz,controlz, dz, patchstddev,  accepted=True, dzshifted=None, dzshiftedsq=None ):
         self.index=index
         self.x=x 
         self.y=y
         self.lidarz = lidarz
         self.controlz=controlz
         self.dz = dz
+        self.patchstddev = patchstddev
         self.accepted = accepted
         self.dzshifted = dzshifted
         self.dzshiftedsq = dzshiftedsq
@@ -571,7 +702,7 @@ class PointList:
         pass    
 
     def addPoint(self, *args):
-        self.points[args[0]]=Point(args[0], args[1], args[2], args[3], args[4], args[5])
+        self.points[args[0]]=Point(args[0], args[1], args[2], args[3], args[4], args[5], args[6])
 
     def calc_sum(self, attr):
         sm = sum(float(getattr(point, attr)) for key, point in self.points.items())
@@ -602,6 +733,25 @@ class PointList:
             self.finalstddev = std
         PointList.caltime += 1
         return std
+        
+    def createOutputFiles(self,outputpath):
+
+        txtfile = os.path.join(outputpath,'GCP_accepted.txt').replace('\\','/')
+        txtf =  open(txtfile, 'w') 
+           
+        rejtxtfile = os.path.join(outputpath,'GCP_rejected.txt').replace('\\','/')
+        rejtf = open(rejtxtfile, 'w')
+
+        for key,point in self.points.items():
+            if point.accepted:
+                txtf.write('{0} {1} {2} {3}\n'.format(point.index, point.x, point.y, point.controlz))
+            else:
+                rejtf.write('{0} {1} {2} {3}\n'.format(point.index, point.x, point.y, point.controlz))
+
+        txtf.close()
+        rejtf.close()
+
+        return 
 
     def filter_data(self, tsigma):
         rejected = 0
@@ -625,7 +775,7 @@ class PointList:
         self.calc_average('dz')
         print("Final average : {0}".format(self.finalaverage))
         self.calc_stdev('dz')
-        print("Final Sigma : {0}".format(self.finalstddev))
+        print("Final Std Deviation : {0}".format(self.finalstddev))
 
         if self.finalaverage:
             dzsqsum = []
@@ -665,20 +815,36 @@ class AtlassGen():
     def FILELIST (filepattern, inputfolder):
         filelist = []
         if len(filepattern) >=2:
-            print('Number of patterns found : {0}'.format(len(filepattern)))
+            #print('Number of patterns found : {0}'.format(len(filepattern)))
+            pass
         for pattern in filepattern:
             pattern = pattern.strip()
-            print ('Selecting files with pattern {0}'.format(pattern))
+            #print ('Selecting files with pattern {0}'.format(pattern))
             files = glob.glob(inputfolder+"\\"+pattern)
             for file in files:
                 filelist.append(file)
-        print('Number of Files founds : {0} '.format(len(filelist)))
+        #print('Number of Files founds : {0} '.format(len(filelist)))
         return filelist
 
+    def DIRLIST (inputfolder):
+        dirlist = []
+
+        folders = glob.glob(inputfolder+"\\*\\")
+        for folder in folders:
+            dirlist.append(folder)
+        print('Number of Folders founds : {0} '.format(len(dirlist)))
+        return dirlist
+        
     def FILESPEC(filename):
         # splits file into components
         path,name=os.path.split(filename)
-        name,ext=name.split(".")
+        pattern=name.split(".")
+        if len(pattern) == 2:
+            name = pattern[0]
+            ext = pattern[1]
+        else:
+            name = pattern[0]
+            ext = pattern[len(pattern)-1]
     
         return path, name, ext    
 
@@ -700,4 +866,206 @@ class AtlassGen():
         return boxcoords
 
     
+    
+    def bufferTile(tile,tilelayout,outputfile,buffer,gndclasses,inputfolder, filetype):
+        print(gndclasses)
+        print('buffering {0} - out {1}'.format(tile.name, outputfile))
+        neighbourlasfiles = []
+        try:
+            neighbours =  tilelayout.gettilesfrombounds(tile.xmin-buffer,tile.ymin-buffer,tile.xmax+buffer,tile.ymax+buffer)
         
+    
+        except:
+            print("tile: {0} does not exist in geojson file".format(tile.name))
+    
+        print('Neighbours : {0}'.format(neighbours))
+       
+
+        if isinstance(neighbours, str):
+            neighbours = [neighbours]
+
+        #Get the neighbouring files
+        for neighbour in neighbours:
+            neighbour = os.path.join(inputfolder, '{0}.{1}'.format(neighbour, filetype))
+            if os.path.isfile(neighbour):
+                print('\n{0}'.format(neighbour))
+                neighbourlasfiles.append(neighbour)
+            else:
+                print('\nFile {0} could not be found in {1}'.format(neighbour, inputfolder))
+
+        print(neighbourlasfiles)
+        keep='-keep_xy {0} {1} {2} {3}'.format(tile.xmin-buffer, tile.ymin-buffer, tile.xmax+buffer, tile.ymax+buffer)
+        keep=keep.split()
+        log = ''
+    
+        try:
+            subprocessargs=['C:/LAStools/bin/las2las.exe','-i'] + neighbourlasfiles + ['-olaz','-o', outputfile,'-merged','-keep_class']+ gndclasses + keep
+            subprocessargs=list(map(str,subprocessargs))
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)  
+
+
+        except subprocess.CalledProcessError as suberror:
+                log=log +"{0}\n".format(suberror.stdout)
+                print(log)
+                return (False,None,log)
+
+        except Exception as e:
+            log = "Making Buffered for {0} Exception - {1}".format(outputfile, e)
+            print(log)
+            return(False,None, log)
+
+        finally:
+            if os.path.isfile(outputfile):
+                log = "Making Buffered for {0} Success".format(outputfile)
+                print(log)
+                return (True,outputfile, log)
+
+            else: 
+                log = "Making Buffered for {0} Failed".format(outputfile)
+                print(log)
+                return (False,None, log)
+
+
+
+    def mergeFiles(inputfolder,outputfile,filetype):
+
+        try:
+            subprocessargs=['C:/LAStools/bin/las2las.exe','-i','{0}/*.{1}'.format(inputfolder,filetype),'-o{0}'.format(filetype),'-o', outputfile,'-merged' ]
+            subprocessargs=list(map(str,subprocessargs))
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)  
+
+
+        except subprocess.CalledProcessError as suberror:
+                log=log +"{0}\n".format(suberror.stdout)
+                print(log)
+                return (False,None,log)
+
+        except Exception as e:
+            log = "Making merged file for {0} Exception - {1}".format(outputfile, e)
+            print(log)
+            return(False,None, log)
+
+        finally:
+            if os.path.isfile(outputfile):
+                log = "Making merged for {0} Success".format(outputfile)
+                print(log)
+                return (True,outputfile, log)
+
+            else: 
+                log = "Making merged for {0} Failed".format(outputfile)
+                print(log)
+                return (False,None, log)
+
+    def clip(input, output, poly, filetype):
+
+        if isinstance(input,str):
+            input = [input]
+
+
+        log=''
+        try:
+            subprocessargs=['C:/LAStools/bin/lasclip.exe', '-i','-use_lax' ] + input + [ '-merged', '-poly', poly, '-o', output, '-o{0}'.format(filetype)]
+            subprocessargs=list(map(str,subprocessargs))    
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+            if os.path.isfile(output):
+                log = "Clipping {0} output : {1}".format(str(input), str(output)) 
+                return (True,output, log)
+
+            else:
+                log = "Clipping failed for {0}. May be outside AOI ".format(str(input)) 
+                print(log)
+                return (False,None,log)
+
+        except subprocess.CalledProcessError as suberror:
+            log=log +'\n'+ "{0}\n".format(suberror.stdout)
+            print(log)
+            return (False,None,log)
+
+        except:
+            log = "Clipping failed for {0}. Failed at Subprocess ".format(str(input)) 
+            print(log)
+            return(False, None, log)   
+    
+        
+    def index(input):
+    
+        log = ''
+        try:
+            subprocessargs=['C:/LAStools/bin/lasindex.exe','-i', input]
+            subprocessargs=list(map(str,subprocessargs)) 
+            p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+            return(True, input, "Success")
+
+        except subprocess.CalledProcessError as suberror:
+            log=log +'\n'+ "{0}\n".format(suberror.stdout)
+            print(log)
+            return (False,None,log)
+
+        except:
+            return(False, None, "Error")
+
+    def asciigridtolas(input, output , filetype):
+        '''
+        Converts an ascii file to a las/laz file and retains the milimetre precision.
+        '''
+
+        log = ''
+        if os.path.isfile(input):
+            print('Converting {0} to {1}'.format(input,filetype))
+            try:
+                #las2las -i <dtmfile> -olas -o <dtmlazfile>
+                subprocessargs=['C:/LAStools/bin/las2las.exe','-i', input, '-o{0}'.format(filetype), '-o', output, '-rescale', 0.001, 0.001, 0.001] 
+                subprocessargs=list(map(str,subprocessargs)) 
+                #print(subprocessargs)
+                p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+                    
+            except subprocess.CalledProcessError as suberror:
+                log=log +'\n'+ "{0}\n".format(suberror.stdout)
+                print(log)
+                return (False,None,log)
+
+            except:
+                log ='Converting {0} file  to {1} Failed at exception'.format(input, filetype)
+                return (False, output, log)
+            finally:
+                if os.path.isfile(output):
+                    log ='Converting {0} file  to {1} success'.format(input, filetype)
+                    return (True, output, log)
+                else:
+                    log ='Converting {0} file  to {1} Failed'.format(input, filetype)
+                    return (False, output, log)
+            
+            
+    def lastoasciigrid(x,y,inputF, output, tilesize, step):
+        '''
+        Converts a las/laz file to ascii and retains the milimetre precision.
+        '''
+
+        if os.path.isfile(inputF):
+            log = ''
+            try:
+                #las2las -i <dtmfile> -olas -o <dtmlazfile>
+                subprocessargs=['C:/LAStools/bin/lasgrid.exe','-i', inputF, '-merged','-oasc','-o', output, '-nbits',32,'-fill',0,'-step',step,'-elevation','-highest']
+                subprocessargs=subprocessargs+['-ll',x,y,'-ncols',math.ceil((tilesize)/step), '-nrows',math.ceil((tilesize)/step)]
+                subprocessargs=list(map(str,subprocessargs))       
+                p = subprocess.run(subprocessargs,stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False, check=True, universal_newlines=True)
+
+            
+            except subprocess.CalledProcessError as suberror:
+                log=log +'\n'+ "{0}\n".format(suberror.stdout)
+                print(log)
+                return (False,None,log)
+
+            except:
+                log ='Converting las to asc Failed at exception for : {0}'.format(inputF)
+                return (False, output, log)
+            finally:
+                if os.path.isfile(output):
+                    log ='Converting las to asc success for : {0}'.format(inputF)
+                    return (True, output, log)
+                else:
+                    log ='Converting las to asc Failed for {0}'.format(inputF)
+                    return (False, output, log)
+            
+        else:
+            return(True,None,'Not input File')           
